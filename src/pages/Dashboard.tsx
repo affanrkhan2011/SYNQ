@@ -13,6 +13,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [showNewGroupModal, setShowNewGroupModal] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
+  const [createError, setCreateError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -71,9 +72,16 @@ export default function Dashboard() {
 
       setShowNewGroupModal(false);
       setNewGroupName('');
+      setCreateError(null);
       navigate(`/groups/${groupId}`);
-    } catch (error) {
+    } catch (error: any) {
        handleFirestoreError(error, OperationType.CREATE, `groups/create`);
+       
+       if (error?.code === 'permission-denied') {
+         setCreateError('Permission denied. Please ensure your Firestore Database is created and security rules are updated.');
+       } else {
+         setCreateError(error?.message || 'Failed to create project.');
+       }
     }
   };
 
@@ -141,11 +149,23 @@ export default function Dashboard() {
           <div className="bg-black border border-white/20 w-full max-w-md shadow-2xl">
             <div className="px-6 py-5 border-b border-white/20 flex items-center justify-between">
               <h2 className="font-bold text-sm uppercase tracking-widest">Create New Project</h2>
-              <button onClick={() => setShowNewGroupModal(false)} className="text-white/40 hover:text-white transition-colors">
+              <button 
+                onClick={() => {
+                  setShowNewGroupModal(false);
+                  setCreateError(null);
+                }} 
+                className="text-white/40 hover:text-white transition-colors"
+                type="button"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
             <form onSubmit={handleCreateGroup} className="p-6">
+              {createError && (
+                <div className="mb-6 p-4 border border-red-500/50 bg-red-500/10 text-red-500 text-xs font-bold uppercase tracking-widest">
+                  {createError}
+                </div>
+              )}
               <div className="mb-8">
                 <label className="block text-[10px] font-bold text-white/40 uppercase tracking-widest mb-3">Project Name</label>
                 <input 
@@ -161,7 +181,10 @@ export default function Dashboard() {
               <div className="flex gap-4 justify-end">
                 <button 
                   type="button" 
-                  onClick={() => setShowNewGroupModal(false)}
+                  onClick={() => {
+                    setShowNewGroupModal(false);
+                    setCreateError(null);
+                  }}
                   className="px-6 py-3 border border-transparent text-white text-xs font-bold uppercase hover:bg-white/10 transition-colors"
                 >
                   Cancel

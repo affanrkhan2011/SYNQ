@@ -3,17 +3,17 @@ import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  firestoreDatabaseId: import.meta.env.VITE_FIREBASE_DATABASE_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyAb4utSd4YnSAwttnyNQL_3YxJ5Kbp8j5s",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "synq-1000.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "synq-1000",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "synq-1000.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "311500722408",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:311500722408:web:aff2f3060474bce7d1b95d",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-G56HG47R5M"
 };
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = getFirestore(app);
 
 // Test connectivity
 import { doc, getDocFromServer } from 'firebase/firestore';

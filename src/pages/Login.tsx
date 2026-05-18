@@ -22,8 +22,10 @@ export default function Login() {
       console.error("Login failed", error);
       if (error.code === 'auth/popup-closed-by-user') {
         setErrorMsg('Login was cancelled. Please try again.');
+      } else if (error.code === 'auth/unauthorized-domain') {
+        setErrorMsg('Unauthorized domain. Please add this domain to Firebase Console > Authentication > Settings > Authorized domains.');
       } else {
-        setErrorMsg('Failed to sign in. Please try again.');
+        setErrorMsg(`Failed to sign in: ${error.message}`);
       }
     }
   };

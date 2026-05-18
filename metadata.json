@@ -1,0 +1,8 @@
+{
+  "name": "SYNQ",
+  "description": "Black and white minimalist team project management app with Google Sign-in, task assignment, chat, and document linking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

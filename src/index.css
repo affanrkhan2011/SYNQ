@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@theme {
+  --color-canvas: #000000;
+  --color-foreground: #ffffff;
+}
+
+body {
+  background-color: var(--color-canvas);
+  color: var(--color-foreground);
+  margin: 0;
+  height: 100vh;
+}
+
+#root {
+  height: 100%;
+}

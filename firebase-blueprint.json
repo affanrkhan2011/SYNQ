@@ -1,0 +1,116 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "displayName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["email", "firstName", "lastName", "displayName", "createdAt"]
+    },
+    "Group": {
+      "title": "Group",
+      "description": "A workspace or project group",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["name", "ownerId", "createdAt"]
+    },
+    "GroupMember": {
+      "title": "GroupMember",
+      "description": "Membership of a user in a group",
+      "type": "object",
+      "properties": {
+        "role": { "type": "string", "enum": ["owner", "member"] },
+        "joinedAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["role", "joinedAt"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "A task within a group",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "assigneeId": { "type": "string" },
+        "status": { "type": "string", "enum": ["todo", "in_progress", "completed"] },
+        "createdAt": { "type": "string", "format": "timestamp" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["title", "description", "assigneeId", "status", "createdAt", "createdBy"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A chat message within a group",
+      "type": "object",
+      "properties": {
+        "text": { "type": "string" },
+        "senderId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" }
+      },
+      "required": ["text", "senderId", "createdAt"]
+    },
+    "UserMembership": {
+      "title": "UserMembership",
+      "description": "Pointer to a group from user",
+      "type": "object",
+      "properties": {
+        "groupId": { "type": "string" },
+        "joinedAt": { "type": "string", "format": "timestamp" },
+        "groupName": { "type": "string" }
+      },
+      "required": ["groupId", "joinedAt", "groupName"]
+    },
+    "Document": {
+      "title": "Document",
+      "description": "A linked document or resource within a group",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "url": { "type": "string" },
+        "createdAt": { "type": "string", "format": "timestamp" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["title", "url", "createdAt", "createdBy"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "/users/{userId}/memberships/{groupId}": {
+      "schema": { "$ref": "#/entities/UserMembership" },
+      "description": "Groups that the user is a member of"
+    },
+    "/groups/{groupId}": {
+      "schema": { "$ref": "#/entities/Group" },
+      "description": "Project groups"
+    },
+    "/groups/{groupId}/members/{userId}": {
+      "schema": { "$ref": "#/entities/GroupMember" },
+      "description": "Members of a specific group"
+    },
+    "/groups/{groupId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "Tasks within a specific group"
+    },
+    "/groups/{groupId}/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/Message" },
+      "description": "Chat messages within a group"
+    },
+    "/groups/{groupId}/documents/{documentId}": {
+      "schema": { "$ref": "#/entities/Document" },
+      "description": "Document links within a group"
+    }
+  }
+}

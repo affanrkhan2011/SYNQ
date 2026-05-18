@@ -1,0 +1,200 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isMemberOfGroup(groupId) {
+      return exists(/databases/$(database)/documents/groups/$(groupId)/members/$(request.auth.uid));
+    }
+
+    function getGroupMemberRole(groupId, userId) {
+      return get(/databases/$(database)/documents/groups/$(groupId)/members/$(userId)).data.role;
+    }
+
+    // --- Entity Validations ---
+
+    function isValidUserMembership(data) {
+      return data.keys().hasAll(['groupId', 'joinedAt', 'groupName']) &&
+             data.keys().size() == 3 &&
+             data.groupId is string && data.groupId.size() > 0 && data.groupId.size() <= 128 &&
+             data.groupName is string && data.groupName.size() > 0 && data.groupName.size() <= 100 &&
+             data.joinedAt == request.time;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['email', 'firstName', 'lastName', 'displayName', 'createdAt']) && 
+             data.keys().size() == 5 &&
+             data.email is string && data.email.size() > 0 && data.email.size() <= 256 &&
+             data.firstName is string && data.firstName.size() <= 100 &&
+             data.lastName is string && data.lastName.size() <= 100 &&
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 100 &&
+             data.createdAt == request.time;
+    }
+
+    function isValidGroup(data) {
+      return data.keys().hasAll(['name', 'ownerId', 'createdAt']) &&
+             data.keys().size() == 3 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.ownerId == request.auth.uid &&
+             data.createdAt == request.time;
+    }
+
+    function isValidGroupMember(data) {
+      return data.keys().hasAll(['role', 'joinedAt']) &&
+             data.keys().size() == 2 &&
+             data.role in ['owner', 'member'] &&
+             data.joinedAt == request.time;
+    }
+
+    function isValidTask(data) {
+      return data.keys().hasAll(['title', 'description', 'assigneeId', 'status', 'createdAt', 'createdBy']) &&
+             data.keys().size() == 6 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 300 &&
+             data.description is string && data.description.size() <= 10000 &&
+             data.assigneeId is string && data.assigneeId.size() <= 128 &&
+             data.status in ['todo', 'in_progress', 'completed'] &&
+             data.createdAt == request.time &&
+             data.createdBy == request.auth.uid;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['text', 'senderId', 'createdAt']) &&
+             data.keys().size() == 3 &&
+             data.text is string && data.text.size() > 0 && data.text.size() <= 5000 &&
+             data.senderId == request.auth.uid &&
+             data.createdAt == request.time;
+    }
+
+    function isValidDocument(data) {
+      return data.keys().hasAll(['title', 'url', 'createdAt', 'createdBy']) &&
+             data.keys().size() == 4 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 300 &&
+             data.url is string && data.url.size() > 0 && data.url.size() <= 2048 &&
+             data.createdAt == request.time &&
+             data.createdBy == request.auth.uid;
+    }
+
+    // --- Path Rules ---
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isVerified() && isValidId(userId);
+      allow list: if isSignedIn() && isVerified();
+      allow create: if isSignedIn() && isVerified() && isValidId(userId) && request.auth.uid == userId && isValidUser(incoming());
+      allow update: if isSignedIn() && isVerified() && isValidId(userId) && request.auth.uid == userId &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['firstName', 'lastName', 'displayName']) &&
+                       (incoming().firstName is string && incoming().firstName.size() <= 100) &&
+                       (incoming().lastName is string && incoming().lastName.size() <= 100) &&
+                       (incoming().displayName is string && incoming().displayName.size() > 0 && incoming().displayName.size() <= 100) &&
+                       incoming().email == existing().email &&
+                       incoming().createdAt == existing().createdAt;
+                       
+      match /memberships/{groupId} {
+        allow read: if isSignedIn() && isVerified() && request.auth.uid == userId;
+        allow list: if isSignedIn() && isVerified() && request.auth.uid == userId;
+        allow create: if isSignedIn() && isVerified() && request.auth.uid == userId && isValidId(groupId) && isValidUserMembership(incoming());
+        allow delete: if isSignedIn() && isVerified() && request.auth.uid == userId && isValidId(groupId);
+      }
+    }
+
+    match /groups/{groupId} {
+      allow get: if isSignedIn() && isVerified() && isValidId(groupId);
+      allow list: if false; 
+      allow create: if isSignedIn() && isVerified() && isValidId(groupId) && isValidGroup(incoming());
+      allow update: if isSignedIn() && isVerified() && isValidId(groupId) &&
+                       isMemberOfGroup(groupId) &&
+                       getGroupMemberRole(groupId, request.auth.uid) == 'owner' &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['name']) &&
+                       incoming().name is string && incoming().name.size() > 0 && incoming().name.size() <= 100 &&
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().createdAt == existing().createdAt;
+    }
+
+    match /groups/{groupId}/members/{memberId} {
+      allow read: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(memberId) && isMemberOfGroup(groupId);
+      allow list: if isSignedIn() && isVerified() && isValidId(groupId) && isMemberOfGroup(groupId);
+      allow create: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(memberId) &&
+                       memberId == request.auth.uid &&
+                       existsAfter(/databases/$(database)/documents/groups/$(groupId)) &&
+                       isValidGroupMember(incoming());
+      allow update: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(memberId) &&
+                       isMemberOfGroup(groupId) &&
+                       getGroupMemberRole(groupId, request.auth.uid) == 'owner' &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['role']) &&
+                       incoming().role in ['owner', 'member'] &&
+                       incoming().joinedAt == existing().joinedAt;
+      allow delete: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(memberId) &&
+                       isMemberOfGroup(groupId) &&
+                       (request.auth.uid == memberId || getGroupMemberRole(groupId, request.auth.uid) == 'owner');
+    }
+
+    match /groups/{groupId}/tasks/{taskId} {
+      allow read: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(taskId) && isMemberOfGroup(groupId);
+      allow list: if isSignedIn() && isVerified() && isValidId(groupId) && isMemberOfGroup(groupId);
+      allow create: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(taskId) &&
+                       isMemberOfGroup(groupId) &&
+                       isValidTask(incoming());
+      allow update: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(taskId) &&
+                       isMemberOfGroup(groupId) &&
+                       (
+                         (incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
+                          incoming().status in ['todo', 'in_progress', 'completed'] &&
+                          incoming().title == existing().title &&
+                          incoming().description == existing().description &&
+                          incoming().assigneeId == existing().assigneeId &&
+                          incoming().createdAt == existing().createdAt &&
+                          incoming().createdBy == existing().createdBy) ||
+                         (incoming().diff(existing()).affectedKeys().hasOnly(['title', 'description', 'assigneeId', 'status']) &&
+                          incoming().title is string && incoming().title.size() > 0 && incoming().title.size() <= 300 &&
+                          incoming().description is string && incoming().description.size() <= 10000 &&
+                          incoming().assigneeId is string && incoming().assigneeId.size() <= 128 &&
+                          incoming().status in ['todo', 'in_progress', 'completed'] &&
+                          incoming().createdAt == existing().createdAt &&
+                          incoming().createdBy == existing().createdBy)
+                       );
+      allow delete: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(taskId) &&
+                       isMemberOfGroup(groupId);
+    }
+
+    match /groups/{groupId}/messages/{messageId} {
+      allow read: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(messageId) && isMemberOfGroup(groupId);
+      allow list: if isSignedIn() && isVerified() && isValidId(groupId) && isMemberOfGroup(groupId);
+      allow create: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(messageId) &&
+                       isMemberOfGroup(groupId) &&
+                       isValidMessage(incoming());
+      allow delete: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(messageId) &&
+                       isMemberOfGroup(groupId) && existing().senderId == request.auth.uid;
+    }
+
+    match /groups/{groupId}/documents/{documentId} {
+      allow read: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(documentId) && isMemberOfGroup(groupId);
+      allow list: if isSignedIn() && isVerified() && isValidId(groupId) && isMemberOfGroup(groupId);
+      allow create: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(documentId) &&
+                       isMemberOfGroup(groupId) &&
+                       isValidDocument(incoming());
+      allow delete: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(documentId) &&
+                       isMemberOfGroup(groupId) && existing().createdBy == request.auth.uid;
+    }
+  }
+}

@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../components/AuthProvider';
-import { signInWithGoogle } from '../lib/firebase';
+import { auth, signInWithGoogle } from '../lib/firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 
 export default function Login() {
   const { user, loading } = useUser();
   const navigate = useNavigate();
   const [errorMsg, setErrorMsg] = useState('');
+  const [isLogin, setIsLogin] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
     if (user && !loading) {
@@ -14,12 +19,12 @@ export default function Login() {
     }
   }, [user, loading, navigate]);
 
-  const handleLogin = async () => {
+  const handleGoogleLogin = async () => {
     setErrorMsg('');
     try {
       await signInWithGoogle();
     } catch (error: any) {
-      console.error("Login failed", error);
+      console.error("Google Login failed", error);
       if (error.code === 'auth/popup-closed-by-user') {
         setErrorMsg('Login was cancelled. Please try again.');
       } else if (error.code === 'auth/unauthorized-domain') {
@@ -30,24 +35,108 @@ export default function Login() {
     }
   };
 
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) {
+      setErrorMsg('Please enter both email and password.');
+      return;
+    }
+
+    setErrorMsg('');
+    setIsSubmitting(true);
+    try {
+      if (isLogin) {
+        await signInWithEmailAndPassword(auth, email, password);
+      } else {
+        await createUserWithEmailAndPassword(auth, email, password);
+      }
+    } catch (error: any) {
+      console.error("Email auth failed", error);
+      if (error.code === 'auth/invalid-credential') {
+        setErrorMsg('Invalid email or password.');
+      } else if (error.code === 'auth/email-already-in-use') {
+        setErrorMsg('An account already exists with this email.');
+      } else if (error.code === 'auth/weak-password') {
+        setErrorMsg('Password should be at least 6 characters.');
+      } else {
+        setErrorMsg(`Authentication failed: ${error.message}`);
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="h-screen w-full flex flex-col items-center justify-center bg-black text-white p-4 font-sans">
       <div className="w-full max-w-sm flex flex-col border border-white/20 p-10 bg-white/[0.02]">
-        <div className="mb-10">
+        <div className="mb-10 text-center">
           <h1 className="text-4xl font-bold tracking-tighter uppercase mb-1">SYNQ</h1>
-          <div className="w-8 h-1 bg-white mb-4"></div>
+          <div className="w-8 h-1 bg-white mb-4 mx-auto"></div>
           <p className="text-[10px] text-white/50 uppercase tracking-widest font-bold">Project Management</p>
         </div>
         
+        <div className="mb-8 flex border-b border-white/20">
+          <button
+            className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-colors ${isLogin ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white/80'}`}
+            onClick={() => { setIsLogin(true); setErrorMsg(''); }}
+          >
+            Log In
+          </button>
+          <button
+            className={`flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-colors ${!isLogin ? 'text-white border-b-2 border-white' : 'text-white/40 hover:text-white/80'}`}
+            onClick={() => { setIsLogin(false); setErrorMsg(''); }}
+          >
+            Sign Up
+          </button>
+        </div>
+
         <div className="space-y-4">
           {errorMsg && (
             <div className="bg-red-500/10 border border-red-500/50 text-red-500 text-[10px] uppercase tracking-widest p-3 font-bold text-center mb-4">
               {errorMsg}
             </div>
           )}
+
+          <form onSubmit={handleEmailAuth} className="space-y-4">
+            <div>
+              <input
+                type="email"
+                placeholder="EMAIL ADDRESS"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-transparent border border-white/20 text-white text-xs px-4 py-3 uppercase tracking-widest focus:outline-none focus:border-white transition-colors placeholder:text-white/20"
+                required
+              />
+            </div>
+            <div>
+              <input
+                type="password"
+                placeholder="PASSWORD"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-transparent border border-white/20 text-white text-xs px-4 py-3 uppercase tracking-widest focus:outline-none focus:border-white transition-colors placeholder:text-white/20"
+                required
+              />
+            </div>
+            <button 
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full border border-white bg-white text-black hover:bg-white/90 disabled:opacity-50 disabled:hover:bg-white transition-colors py-4 px-4 font-bold text-xs uppercase tracking-widest"
+            >
+              {isSubmitting ? 'PLEASE WAIT...' : isLogin ? 'LOG IN WITH EMAIL' : 'SIGN UP WITH EMAIL'}
+            </button>
+          </form>
+
+          <div className="flex items-center gap-4 py-2">
+            <div className="flex-1 h-px bg-white/10"></div>
+            <span className="text-[10px] text-white/40 font-bold uppercase tracking-widest">OR</span>
+            <div className="flex-1 h-px bg-white/10"></div>
+          </div>
+
           <button 
-            onClick={handleLogin}
-            className="w-full border border-white bg-black hover:bg-white hover:text-black transition-colors text-white py-4 px-4 font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-3"
+            onClick={handleGoogleLogin}
+            type="button"
+            className="w-full border border-white/20 bg-transparent hover:bg-white/5 transition-colors text-white py-4 px-4 font-bold text-xs uppercase tracking-widest flex items-center justify-center gap-3"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24">
               <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />

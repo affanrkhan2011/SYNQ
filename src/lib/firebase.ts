@@ -1,25 +1,28 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { initializeFirestore, memoryLocalCache } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyAb4utSd4YnSAwttnyNQL_3YxJ5Kbp8j5s",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "synq-1000.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "synq-1000",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "synq-1000.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "311500722408",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:311500722408:web:aff2f3060474bce7d1b95d",
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-G56HG47R5M"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
+export const db = initializeFirestore(app, {
+  localCache: memoryLocalCache(),
+  experimentalForceLongPolling: true
+});
 
 // Test connectivity
 import { doc, getDocFromServer } from 'firebase/firestore';
 getDocFromServer(doc(db, 'test', 'connection')).catch(err => {
   if (err instanceof Error && err.message.includes('offline')) {
-    console.error('Firestore offline error');
+    console.warn('Firestore is currently offline or unreachable. Retrying with long polling...');
   }
 });
 
@@ -71,6 +74,11 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     operationType,
     path
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  
+  if (error instanceof Error && error.message.includes('offline')) {
+    console.warn('Firestore Offline Error: ', errInfo.error, 'Path:', path);
+  } else {
+    console.error('Firestore Error: ', JSON.stringify(errInfo, null, 2));
+  }
+  // DO NOT throw here, we don't want to crash the app or unhandle promises
 }

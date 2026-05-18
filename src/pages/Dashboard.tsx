@@ -24,7 +24,14 @@ export default function Dashboard() {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setMemberships(data);
       setLoading(false);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/memberships`));
+    }, (error) => {
+      if (error instanceof Error && error.message.includes('offline')) {
+        console.warn('Firestore is offline. Could not load memberships.');
+      } else {
+        handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/memberships`);
+      }
+      setLoading(false);
+    });
     
     return () => unsubscribe();
   }, [user]);

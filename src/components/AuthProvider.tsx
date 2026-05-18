@@ -38,13 +38,34 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
               createdAt: serverTimestamp()
             };
             
-            await setDoc(userRef, newUserData).catch(err => handleFirestoreError(err, OperationType.CREATE, `users/${userDoc.uid}`));
+            await setDoc(userRef, newUserData).catch(err => {
+              if (err instanceof Error && err.message.includes('offline')) {
+                console.warn('Firestore is offline. Could not save user data.');
+              } else {
+                handleFirestoreError(err, OperationType.CREATE, `users/${userDoc.uid}`);
+              }
+            });
             setUserProfile(newUserData);
           } else {
             setUserProfile(userSnap.data());
           }
         } catch (error) {
-           handleFirestoreError(error, OperationType.GET, `users/${userDoc.uid}`);
+           if (error instanceof Error && error.message.includes('offline')) {
+              console.warn('Firestore is offline. Proceeding with default user profile.');
+              // Fallback to basic user profile based on auth data so the app still works!
+              const names = userDoc.displayName ? userDoc.displayName.split(' ') : ['First', 'Last'];
+              setUserProfile({
+                  email: userDoc.email || '',
+                  firstName: names[0] || 'Unknown',
+                  lastName: names.slice(1).join(' ') || 'User',
+                  displayName: userDoc.displayName || 'Unknown User',
+                  isOffline: true
+              });
+           } else {
+              handleFirestoreError(error, OperationType.GET, `users/${userDoc.uid}`);
+              // Provide default profile to avoid crash
+              setUserProfile({ displayName: 'User (Offline Error)' });
+           }
         }
       } else {
         setUserProfile(null);

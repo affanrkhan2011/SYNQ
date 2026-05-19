@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../components/AuthProvider';
 import { auth, signInWithGoogle } from '../lib/firebase';
@@ -35,7 +35,7 @@ export default function Login() {
     }
   };
 
-  const handleEmailAuth = async (e: React.FormEvent) => {
+  const handleEmailAuth = async (e: FormEvent) => {
     e.preventDefault();
     if (!email || !password) {
       setErrorMsg('Please enter both email and password.');

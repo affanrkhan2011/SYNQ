@@ -11,9 +11,10 @@ export default function Dashboard() {
   const { user } = useUser();
   const [memberships, setMemberships] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showNewGroupModal, setShowNewGroupModal] = useState(false);
-  const [newGroupName, setNewGroupName] = useState('');
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -37,51 +38,55 @@ export default function Dashboard() {
     return () => unsubscribe();
   }, [user]);
 
-  const handleCreateGroup = async (e: React.FormEvent) => {
+  const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !newGroupName.trim()) return;
+    if (!user || !newProjectName.trim()) return;
+
+    setCreateError(null);
+    setIsCreating(true);
 
     try {
-      const groupId = uuidv4();
+      const projectId = uuidv4();
       const batch = writeBatch(db);
 
-      // Create group
-      const groupRef = doc(db, 'groups', groupId);
+      // Create project
+      const groupRef = doc(db, 'groups', projectId);
       batch.set(groupRef, {
-        name: newGroupName.trim(),
+        name: newProjectName.trim(),
         ownerId: user.uid,
         createdAt: serverTimestamp()
       });
 
-      // Add user to group members
-      const memberRef = doc(db, 'groups', groupId, 'members', user.uid);
+      // Add user to project members
+      const memberRef = doc(db, 'groups', projectId, 'members', user.uid);
       batch.set(memberRef, {
         role: 'owner',
         joinedAt: serverTimestamp()
       });
 
       // Add membership pointer to user
-      const userMembershipRef = doc(db, 'users', user.uid, 'memberships', groupId);
+      const userMembershipRef = doc(db, 'users', user.uid, 'memberships', projectId);
       batch.set(userMembershipRef, {
-        groupId,
-        groupName: newGroupName.trim(),
+        groupId: projectId,
+        groupName: newProjectName.trim(),
         joinedAt: serverTimestamp()
       });
 
       await batch.commit();
 
-      setShowNewGroupModal(false);
-      setNewGroupName('');
+      setShowNewProjectModal(false);
+      setNewProjectName('');
       setCreateError(null);
-      navigate(`/groups/${groupId}`);
+      navigate(`/groups/${projectId}`);
     } catch (error: any) {
-       handleFirestoreError(error, OperationType.CREATE, `groups/create`);
-       
-       if (error?.code === 'permission-denied') {
-         setCreateError('Permission denied. Please ensure your Firestore Database is created and security rules are updated.');
-       } else {
-         setCreateError(error?.message || 'Failed to create project.');
-       }
+      handleFirestoreError(error, OperationType.CREATE, `groups/create`);
+      if (error?.code === 'permission-denied') {
+        setCreateError('Permission denied. Please ensure your Firestore Database is created and security rules are updated.');
+      } else {
+        setCreateError(error?.message || 'Failed to create project.');
+      }
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -93,7 +98,7 @@ export default function Dashboard() {
           <p className="text-[11px] text-white/40 uppercase tracking-widest mt-1">Manage your active workspaces and teams</p>
         </div>
         <button 
-          onClick={() => setShowNewGroupModal(true)}
+          onClick={() => setShowNewProjectModal(true)}
           className="px-6 py-3 border border-white bg-black text-white text-xs font-bold uppercase hover:bg-white hover:text-black transition-colors flex items-center gap-2"
         >
           <Plus className="w-4 h-4" />
@@ -113,7 +118,7 @@ export default function Dashboard() {
           <h3 className="font-bold text-sm uppercase mb-2">No projects yet</h3>
           <p className="text-white/50 text-xs uppercase tracking-tight max-w-xs mb-8">Get started by creating a new project workspace for your team.</p>
           <button 
-            onClick={() => setShowNewGroupModal(true)}
+            onClick={() => setShowNewProjectModal(true)}
             className="px-6 py-3 border border-white bg-black text-white text-xs font-bold uppercase hover:bg-white hover:text-black transition-colors"
           >
             Create your first project
@@ -144,14 +149,14 @@ export default function Dashboard() {
       )}
 
       {/* Modal */}
-      {showNewGroupModal && (
+      {showNewProjectModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 font-sans">
           <div className="bg-black border border-white/20 w-full max-w-md shadow-2xl">
             <div className="px-6 py-5 border-b border-white/20 flex items-center justify-between">
               <h2 className="font-bold text-sm uppercase tracking-widest">Create New Project</h2>
               <button 
                 onClick={() => {
-                  setShowNewGroupModal(false);
+                  setShowNewProjectModal(false);
                   setCreateError(null);
                 }} 
                 className="text-white/40 hover:text-white transition-colors"
@@ -160,7 +165,7 @@ export default function Dashboard() {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <form onSubmit={handleCreateGroup} className="p-6">
+            <form onSubmit={handleCreateProject} className="p-6">
               {createError && (
                 <div className="mb-6 p-4 border border-red-500/50 bg-red-500/10 text-red-500 text-xs font-bold uppercase tracking-widest">
                   {createError}
@@ -171,8 +176,8 @@ export default function Dashboard() {
                 <input 
                   autoFocus
                   type="text" 
-                  value={newGroupName}
-                  onChange={e => setNewGroupName(e.target.value)}
+                  value={newProjectName}
+                  onChange={e => setNewProjectName(e.target.value)}
                   className="w-full bg-transparent border border-white/20 p-3 text-xs uppercase tracking-tighter outline-none focus:border-white placeholder:text-white/20"
                   placeholder="e.g. TITAN INFRASTRUCTURE"
                   maxLength={100}
@@ -182,7 +187,7 @@ export default function Dashboard() {
                 <button 
                   type="button" 
                   onClick={() => {
-                    setShowNewGroupModal(false);
+                    setShowNewProjectModal(false);
                     setCreateError(null);
                   }}
                   className="px-6 py-3 border border-transparent text-white text-xs font-bold uppercase hover:bg-white/10 transition-colors"
@@ -191,10 +196,10 @@ export default function Dashboard() {
                 </button>
                 <button 
                   type="submit" 
-                  disabled={!newGroupName.trim()}
+                  disabled={!newProjectName.trim() || isCreating}
                   className="px-6 py-3 border border-white bg-white text-black text-xs font-bold uppercase hover:bg-white/90 disabled:opacity-50 transition-colors"
                 >
-                  Create Project
+                  {isCreating ? 'Creating...' : 'Create Project'}
                 </button>
               </div>
             </form>

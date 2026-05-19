@@ -74,19 +74,19 @@ export default function Dashboard() {
 
       await batch.commit();
 
+      setIsCreating(false);
       setShowNewProjectModal(false);
       setNewProjectName('');
       setCreateError(null);
       navigate(`/groups/${projectId}`);
     } catch (error: any) {
+      setIsCreating(false);
       handleFirestoreError(error, OperationType.CREATE, `groups/create`);
       if (error?.code === 'permission-denied') {
         setCreateError('Permission denied. Please ensure your Firestore Database is created and security rules are updated.');
       } else {
         setCreateError(error?.message || 'Failed to create project.');
       }
-    } finally {
-      setIsCreating(false);
     }
   };
 

@@ -1,4 +1,4 @@
-<div align="center">
+﻿<div align="center">
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
@@ -18,8 +18,23 @@ Team project management site for student groups.
 
 Deploy `firestore.rules` in Firebase Console (or via the Firebase CLI) so tasks/chat/docs/admin features can read/write.
 
-## Vercel
+## Deploy (Vercel)
 
-- Build: `npm run build`
-- Output: `dist`
-- SPA routing: `vercel.json` includes a rewrite so deep links like `/groups/:groupId` work on refresh.
+- Framework: `Vite`
+- Build command: `npm run build`
+- Output directory: `dist`
+- SPA routing: handled by `vercel.json` (deep links like `/groups/:groupId` work on refresh)
+
+### Environment variables (Firebase)
+
+Set these in Vercel Project Settings -> Environment Variables:
+
+- `VITE_FIREBASE_API_KEY`
+- `VITE_FIREBASE_AUTH_DOMAIN`
+- `VITE_FIREBASE_PROJECT_ID`
+- `VITE_FIREBASE_STORAGE_BUCKET`
+- `VITE_FIREBASE_MESSAGING_SENDER_ID`
+- `VITE_FIREBASE_APP_ID`
+- `VITE_FIREBASE_MEASUREMENT_ID` (optional)
+
+Also add your Vercel domain in Firebase Console -> Authentication -> Settings -> Authorized domains.

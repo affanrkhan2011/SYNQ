@@ -2,24 +2,59 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
 import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import LoadingOverlay from './LoadingOverlay';
+import { pingFirestore } from '../lib/firestoreConnection';
 
 interface UserContextType {
   user: User | null;
   loading: boolean;
   userProfile: any | null;
+  dbConnecting: boolean;
 }
 
-const UserContext = createContext<UserContextType>({ user: null, loading: true, userProfile: null });
+const UserContext = createContext<UserContextType>({ user: null, loading: true, userProfile: null, dbConnecting: true });
 
 export const UserProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [dbConnecting, setDbConnecting] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function ping() {
+      setDbConnecting(true);
+      try {
+        await pingFirestore();
+      } catch {
+        // Swallow: offline/unreachable should not crash the app; pages already handle offline errors.
+      } finally {
+        if (!cancelled) setDbConnecting(false);
+      }
+    }
+
+    // Initial boot ping + re-ping on reconnect / tab focus.
+    void ping();
+    const onOnline = () => void ping();
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void ping();
+    };
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (userDoc) => {
       setUser(userDoc);
       if (userDoc) {
+        setDbConnecting(true);
         try {
           const userRef = doc(db, 'users', userDoc.uid);
           const userSnap = await getDoc(userRef);
@@ -67,8 +102,10 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
               setUserProfile({ displayName: 'User (Offline Error)' });
            }
         }
+        setDbConnecting(false);
       } else {
         setUserProfile(null);
+        setDbConnecting(false);
       }
       setLoading(false);
     });
@@ -77,7 +114,8 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   return (
-    <UserContext.Provider value={{ user, loading, userProfile }}>
+    <UserContext.Provider value={{ user, loading, userProfile, dbConnecting }}>
+      <LoadingOverlay show={dbConnecting} label="Connecting to database…" />
       {children}
     </UserContext.Provider>
   );

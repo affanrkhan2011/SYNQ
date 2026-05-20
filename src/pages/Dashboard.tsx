@@ -8,7 +8,7 @@ import { Plus, Users, ArrowRight, X } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid'; // need to install uuid or just use a random string. Let's use crypto.randomUUID()
                               
 export default function Dashboard() {
-  const { user } = useUser();
+  const { user, userProfile } = useUser();
   const [memberships, setMemberships] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
@@ -61,7 +61,9 @@ export default function Dashboard() {
       const memberRef = doc(db, 'groups', projectId, 'members', user.uid);
       batch.set(memberRef, {
         role: 'owner',
-        joinedAt: serverTimestamp()
+        joinedAt: serverTimestamp(),
+        displayName: userProfile?.displayName || user.displayName || 'User',
+        email: userProfile?.email || user.email || ''
       });
 
       // Add membership pointer to user

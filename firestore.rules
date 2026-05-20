@@ -8,10 +8,6 @@ service cloud.firestore {
     function isSignedIn() {
       return request.auth != null;
     }
-    
-    function isVerified() {
-      return request.auth.token.email_verified == true;
-    }
 
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
@@ -63,9 +59,11 @@ service cloud.firestore {
 
     function isValidGroupMember(data) {
       return data.keys().hasAll(['role', 'joinedAt']) &&
-             data.keys().size() == 2 &&
+             data.keys().hasOnly(['role', 'joinedAt', 'displayName', 'email']) &&
              data.role in ['owner', 'member'] &&
-             data.joinedAt == request.time;
+             data.joinedAt == request.time &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() > 0 && data.displayName.size() <= 100)) &&
+             (!('email' in data) || (data.email is string && data.email.size() > 0 && data.email.size() <= 256));
     }
 
     function isValidTask(data) {
@@ -99,10 +97,10 @@ service cloud.firestore {
     // --- Path Rules ---
 
     match /users/{userId} {
-      allow get: if isSignedIn() && isVerified() && isValidId(userId);
-      allow list: if isSignedIn() && isVerified();
-      allow create: if isSignedIn() && isVerified() && isValidId(userId) && request.auth.uid == userId && isValidUser(incoming());
-      allow update: if isSignedIn() && isVerified() && isValidId(userId) && request.auth.uid == userId &&
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUser(incoming());
+      allow update: if isSignedIn() && isValidId(userId) && request.auth.uid == userId &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['firstName', 'lastName', 'displayName']) &&
                        (incoming().firstName is string && incoming().firstName.size() <= 100) &&
                        (incoming().lastName is string && incoming().lastName.size() <= 100) &&
@@ -111,18 +109,22 @@ service cloud.firestore {
                        incoming().createdAt == existing().createdAt;
                        
       match /memberships/{groupId} {
-        allow read: if isSignedIn() && isVerified() && request.auth.uid == userId;
-        allow list: if isSignedIn() && isVerified() && request.auth.uid == userId;
-        allow create: if isSignedIn() && isVerified() && request.auth.uid == userId && isValidId(groupId) && isValidUserMembership(incoming());
-        allow delete: if isSignedIn() && isVerified() && request.auth.uid == userId && isValidId(groupId);
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow list: if isSignedIn() && request.auth.uid == userId;
+        allow create: if isSignedIn() && request.auth.uid == userId && isValidId(groupId) && isValidUserMembership(incoming());
+        allow delete: if isSignedIn() && isValidId(groupId) &&
+                        (
+                          request.auth.uid == userId ||
+                          (isMemberOfGroup(groupId) && getGroupMemberRole(groupId, request.auth.uid) == 'owner')
+                        );
       }
     }
 
     match /groups/{groupId} {
-      allow get: if isSignedIn() && isVerified() && isValidId(groupId);
+      allow get: if isSignedIn() && isValidId(groupId);
       allow list: if false; 
-      allow create: if isSignedIn() && isVerified() && isValidId(groupId) && isValidGroup(incoming());
-      allow update: if isSignedIn() && isVerified() && isValidId(groupId) &&
+      allow create: if isSignedIn() && isValidId(groupId) && isValidGroup(incoming());
+      allow update: if isSignedIn() && isValidId(groupId) &&
                        isMemberOfGroup(groupId) &&
                        getGroupMemberRole(groupId, request.auth.uid) == 'owner' &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['name']) &&
@@ -132,30 +134,30 @@ service cloud.firestore {
     }
 
     match /groups/{groupId}/members/{memberId} {
-      allow read: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(memberId) && isMemberOfGroup(groupId);
-      allow list: if isSignedIn() && isVerified() && isValidId(groupId) && isMemberOfGroup(groupId);
-      allow create: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(memberId) &&
+      allow read: if isSignedIn() && isValidId(groupId) && isValidId(memberId) && isMemberOfGroup(groupId);
+      allow list: if isSignedIn() && isValidId(groupId) && isMemberOfGroup(groupId);
+      allow create: if isSignedIn() && isValidId(groupId) && isValidId(memberId) &&
                        memberId == request.auth.uid &&
                        existsAfter(/databases/$(database)/documents/groups/$(groupId)) &&
                        isValidGroupMember(incoming());
-      allow update: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(memberId) &&
+      allow update: if isSignedIn() && isValidId(groupId) && isValidId(memberId) &&
                        isMemberOfGroup(groupId) &&
                        getGroupMemberRole(groupId, request.auth.uid) == 'owner' &&
                        incoming().diff(existing()).affectedKeys().hasOnly(['role']) &&
                        incoming().role in ['owner', 'member'] &&
                        incoming().joinedAt == existing().joinedAt;
-      allow delete: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(memberId) &&
+      allow delete: if isSignedIn() && isValidId(groupId) && isValidId(memberId) &&
                        isMemberOfGroup(groupId) &&
                        (request.auth.uid == memberId || getGroupMemberRole(groupId, request.auth.uid) == 'owner');
     }
 
     match /groups/{groupId}/tasks/{taskId} {
-      allow read: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(taskId) && isMemberOfGroup(groupId);
-      allow list: if isSignedIn() && isVerified() && isValidId(groupId) && isMemberOfGroup(groupId);
-      allow create: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(taskId) &&
+      allow read: if isSignedIn() && isValidId(groupId) && isValidId(taskId) && isMemberOfGroup(groupId);
+      allow list: if isSignedIn() && isValidId(groupId) && isMemberOfGroup(groupId);
+      allow create: if isSignedIn() && isValidId(groupId) && isValidId(taskId) &&
                        isMemberOfGroup(groupId) &&
                        isValidTask(incoming());
-      allow update: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(taskId) &&
+      allow update: if isSignedIn() && isValidId(groupId) && isValidId(taskId) &&
                        isMemberOfGroup(groupId) &&
                        (
                          (incoming().diff(existing()).affectedKeys().hasOnly(['status']) &&
@@ -173,27 +175,27 @@ service cloud.firestore {
                           incoming().createdAt == existing().createdAt &&
                           incoming().createdBy == existing().createdBy)
                        );
-      allow delete: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(taskId) &&
+      allow delete: if isSignedIn() && isValidId(groupId) && isValidId(taskId) &&
                        isMemberOfGroup(groupId);
     }
 
     match /groups/{groupId}/messages/{messageId} {
-      allow read: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(messageId) && isMemberOfGroup(groupId);
-      allow list: if isSignedIn() && isVerified() && isValidId(groupId) && isMemberOfGroup(groupId);
-      allow create: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(messageId) &&
+      allow read: if isSignedIn() && isValidId(groupId) && isValidId(messageId) && isMemberOfGroup(groupId);
+      allow list: if isSignedIn() && isValidId(groupId) && isMemberOfGroup(groupId);
+      allow create: if isSignedIn() && isValidId(groupId) && isValidId(messageId) &&
                        isMemberOfGroup(groupId) &&
                        isValidMessage(incoming());
-      allow delete: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(messageId) &&
+      allow delete: if isSignedIn() && isValidId(groupId) && isValidId(messageId) &&
                        isMemberOfGroup(groupId) && existing().senderId == request.auth.uid;
     }
 
     match /groups/{groupId}/documents/{documentId} {
-      allow read: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(documentId) && isMemberOfGroup(groupId);
-      allow list: if isSignedIn() && isVerified() && isValidId(groupId) && isMemberOfGroup(groupId);
-      allow create: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(documentId) &&
+      allow read: if isSignedIn() && isValidId(groupId) && isValidId(documentId) && isMemberOfGroup(groupId);
+      allow list: if isSignedIn() && isValidId(groupId) && isMemberOfGroup(groupId);
+      allow create: if isSignedIn() && isValidId(groupId) && isValidId(documentId) &&
                        isMemberOfGroup(groupId) &&
                        isValidDocument(incoming());
-      allow delete: if isSignedIn() && isVerified() && isValidId(groupId) && isValidId(documentId) &&
+      allow delete: if isSignedIn() && isValidId(groupId) && isValidId(documentId) &&
                        isMemberOfGroup(groupId) && existing().createdBy == request.auth.uid;
     }
   }

@@ -2,19 +2,24 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# Run and deploy your AI Studio app
+# SYNQ
 
-This contains everything you need to run your app locally.
+Team project management site for student groups.
 
-View your app in AI Studio: https://ai.studio/apps/bba2b8c7-6843-4d13-9a15-9ea2a741bb2e
+## Local dev
 
-## Run Locally
+**Prerequisites:** Node.js + a Firebase project (Auth + Firestore)
 
-**Prerequisites:**  Node.js
+1. Install deps: `npm install`
+2. Create `.env.local` using `.env.example` and fill in the `VITE_FIREBASE_*` values from Firebase Console.
+3. Run: `npm run dev`
 
+## Firestore rules
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Deploy `firestore.rules` in Firebase Console (or via the Firebase CLI) so tasks/chat/docs/admin features can read/write.
+
+## Vercel
+
+- Build: `npm run build`
+- Output: `dist`
+- SPA routing: `vercel.json` includes a rewrite so deep links like `/groups/:groupId` work on refresh.

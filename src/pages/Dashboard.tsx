@@ -76,11 +76,13 @@ export default function Dashboard() {
 
       await batch.commit();
 
-      setIsCreating(false);
+      // Close the modal immediately on success, then route into the project.
       setShowNewProjectModal(false);
       setNewProjectName('');
       setCreateError(null);
-      navigate(`/groups/${projectId}`);
+      setIsCreating(false);
+      // Using `replace` avoids leaving the modal page state in history.
+      navigate(`/groups/${projectId}`, { replace: true });
     } catch (error: any) {
       setIsCreating(false);
       handleFirestoreError(error, OperationType.CREATE, `groups/create`);

@@ -1,59 +1,126 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { doc, getDoc, setDoc, collection, onSnapshot, query, orderBy, serverTimestamp, updateDoc, writeBatch, deleteDoc } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  setDoc,
+  collection,
+  onSnapshot,
+  query,
+  orderBy,
+  serverTimestamp,
+  updateDoc,
+  writeBatch,
+  deleteDoc,
+} from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useUser } from '../components/AuthProvider';
 import Layout from '../components/Layout';
-import { CheckCircle2, Circle } from 'lucide-react';
+import { CheckCircle2, Circle, Search, Filter, AlertTriangle, Calendar, Trash2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { v4 as uuidv4 } from 'uuid';
+
+type TaskStatus = 'todo' | 'in_progress' | 'completed';
+type TaskPriority = 'low' | 'medium' | 'high';
+type GroupMemberRole = 'owner' | 'member' | null;
+
+interface GroupData {
+  id: string;
+  name: string;
+  ownerId: string;
+}
+
+interface TaskItem {
+  id: string;
+  title: string;
+  description: string;
+  assigneeId: string;
+  status: TaskStatus;
+  priority?: TaskPriority;
+  dueDate?: string;
+  createdAt?: any;
+  createdBy?: string;
+}
+
+interface GroupMember {
+  id: string;
+  role: 'owner' | 'member';
+  displayName?: string;
+  email?: string;
+}
+
+interface ChatMessage {
+  id: string;
+  text: string;
+  senderId: string;
+  createdAt?: any;
+}
+
+interface LinkedDoc {
+  id: string;
+  title: string;
+  url: string;
+  createdBy: string;
+  createdAt?: any;
+}
+
+const formatTimestamp = (value: any) => {
+  const date = value?.toDate?.() ?? null;
+  if (!date) return 'Just now';
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+};
+
+const todayIsoDate = () => new Date().toISOString().split('T')[0];
 
 export default function GroupPage() {
   const { groupId } = useParams();
   const { user, userProfile } = useUser();
   const navigate = useNavigate();
-  
-  const [group, setGroup] = useState<any>(null);
-  const [isMember, setIsMember] = useState(false);
-  const [memberRole, setMemberRole] = useState<'owner' | 'member' | null>(null);
-  const [loading, setLoading] = useState(true);
-  
-  const [activeTab, setActiveTab] = useState<'tasks' | 'chat' | 'docs' | 'admin'>('tasks');
 
-  // Load group and membership
+  const [group, setGroup] = useState<GroupData | null>(null);
+  const [isMember, setIsMember] = useState(false);
+  const [memberRole, setMemberRole] = useState<GroupMemberRole>(null);
+  const [loading, setLoading] = useState(true);
+
+  const [activeTab, setActiveTab] = useState<'tasks' | 'chat' | 'docs' | 'admin'>('tasks');
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
     if (!user || !groupId) return;
-    
-    let unsubscribeMember: any;
-    
+
+    let unsubscribeMember: (() => void) | undefined;
+
     const loadGroup = async () => {
       try {
         const groupRef = doc(db, 'groups', groupId);
         const groupSnap = await getDoc(groupRef);
-        
+
         if (!groupSnap.exists()) {
           navigate('/');
           return;
         }
-        
-        setGroup({ id: groupSnap.id, ...groupSnap.data() });
-        
-        // Listen to membership
+
+        setGroup({ id: groupSnap.id, ...(groupSnap.data() as Omit<GroupData, 'id'>) });
+
         const memberRef = doc(db, 'groups', groupId, 'members', user.uid);
         unsubscribeMember = onSnapshot(memberRef, (snap) => {
           setIsMember(snap.exists());
-          setMemberRole((snap.data() as any)?.role || null);
+          setMemberRole((snap.data() as GroupMember | undefined)?.role ?? null);
           setLoading(false);
         });
-        
       } catch (error) {
         handleFirestoreError(error, OperationType.GET, `groups/${groupId}`);
         setLoading(false);
       }
     };
-    
-    loadGroup();
-    
+
+    void loadGroup();
+
     return () => {
       if (unsubscribeMember) unsubscribeMember();
     };
@@ -63,38 +130,40 @@ export default function GroupPage() {
     if (!user || !groupId || !group) return;
     try {
       const batch = writeBatch(db);
-      
-      const memberRef = doc(db, 'groups', groupId, 'members', user.uid);
-      batch.set(memberRef, {
+
+      batch.set(doc(db, 'groups', groupId, 'members', user.uid), {
         role: 'member',
         joinedAt: serverTimestamp(),
         displayName: userProfile?.displayName || user.displayName || 'User',
-        email: userProfile?.email || user.email || ''
+        email: userProfile?.email || user.email || '',
       });
-      
-      const userMembershipRef = doc(db, 'users', user.uid, 'memberships', groupId);
-      batch.set(userMembershipRef, {
-        groupId: groupId,
+
+      batch.set(doc(db, 'users', user.uid, 'memberships', groupId), {
+        groupId,
         groupName: group.name,
-        joinedAt: serverTimestamp()
+        joinedAt: serverTimestamp(),
       });
-      
+
       await batch.commit();
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, `groups/${groupId}/members`);
     }
   };
 
-  const [copied, setCopied] = useState(false);
-
   const copyInviteLink = () => {
     navigator.clipboard.writeText(window.location.href);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setTimeout(() => setCopied(false), 1500);
   };
 
   if (loading) {
-    return <Layout><div className="p-12 flex justify-center"><div className="w-6 h-6 border-2 border-black border-t-transparent rounded-full animate-spin"></div></div></Layout>;
+    return (
+      <Layout>
+        <div className="p-12 flex justify-center">
+          <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+        </div>
+      </Layout>
+    );
   }
 
   if (!isMember) {
@@ -106,7 +175,7 @@ export default function GroupPage() {
           </div>
           <h2 className="text-xl font-bold mb-2 uppercase tracking-wide">Join {group?.name}</h2>
           <p className="text-white/50 text-xs mb-8 uppercase tracking-widest">You've been invited to collaborate.</p>
-          <button 
+          <button
             onClick={handleJoin}
             className="w-full border border-white bg-white text-black py-4 font-bold text-xs uppercase hover:bg-black hover:text-white transition-colors"
           >
@@ -118,37 +187,47 @@ export default function GroupPage() {
   }
 
   return (
-    <Layout 
+    <Layout
       title={
-        <div className="flex items-center justify-between w-full font-sans">
+        <div className="flex items-center justify-between w-full font-sans gap-4">
           <div>
             <h1 className="font-bold text-xl uppercase tracking-tight">{group?.name}</h1>
+            <p className="text-[10px] text-white/40 uppercase tracking-widest mt-1">Collaborative Team Workspace</p>
           </div>
-          <button 
+          <button
             onClick={copyInviteLink}
-            className="px-6 py-2 bg-white text-black text-xs font-bold uppercase transition-colors hover:bg-white/90"
+            className="px-5 py-2 bg-white text-black text-xs font-bold uppercase transition-colors hover:bg-white/90"
           >
             {copied ? 'Copied' : 'Share Link'}
           </button>
         </div>
       }
     >
-      <div className="mb-8 border-b border-white/20 flex gap-8">
-        <button 
+      <div className="mb-8 border-b border-white/20 flex gap-8 overflow-auto">
+        <button
           onClick={() => setActiveTab('tasks')}
-          className={clsx("pb-4 text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center gap-2", activeTab === 'tasks' ? "border-b border-white text-white" : "border-b border-transparent text-white/50 hover:text-white")}
+          className={clsx(
+            'pb-4 text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center gap-2',
+            activeTab === 'tasks' ? 'border-b border-white text-white' : 'border-b border-transparent text-white/50 hover:text-white',
+          )}
         >
           Tasks
         </button>
-        <button 
+        <button
           onClick={() => setActiveTab('chat')}
-          className={clsx("pb-4 text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center gap-2", activeTab === 'chat' ? "border-b border-white text-white" : "border-b border-transparent text-white/50 hover:text-white")}
+          className={clsx(
+            'pb-4 text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center gap-2',
+            activeTab === 'chat' ? 'border-b border-white text-white' : 'border-b border-transparent text-white/50 hover:text-white',
+          )}
         >
           Chat
         </button>
-        <button 
+        <button
           onClick={() => setActiveTab('docs')}
-          className={clsx("pb-4 text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center gap-2", activeTab === 'docs' ? "border-b border-white text-white" : "border-b border-transparent text-white/50 hover:text-white")}
+          className={clsx(
+            'pb-4 text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center gap-2',
+            activeTab === 'docs' ? 'border-b border-white text-white' : 'border-b border-transparent text-white/50 hover:text-white',
+          )}
         >
           Documents
         </button>
@@ -156,10 +235,10 @@ export default function GroupPage() {
           <button
             onClick={() => setActiveTab('admin')}
             className={clsx(
-              "pb-4 text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center gap-2",
+              'pb-4 text-[10px] font-bold uppercase tracking-widest transition-colors flex items-center gap-2',
               activeTab === 'admin'
-                ? "border-b border-white text-white"
-                : "border-b border-transparent text-white/50 hover:text-white"
+                ? 'border-b border-white text-white'
+                : 'border-b border-transparent text-white/50 hover:text-white',
             )}
           >
             Admin
@@ -177,24 +256,33 @@ export default function GroupPage() {
   );
 }
 
-// Ensure TaskView, ChatView, DocsView have proper unique IDs for documents since Rules require explicit unique ids for updates if using doc(db, path, uuidv4()) etc.
-
 function TasksView({ groupId }: { groupId: string }) {
-  const [tasks, setTasks] = useState<any[]>([]);
-  const [members, setMembers] = useState<any[]>([]);
+  const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [members, setMembers] = useState<GroupMember[]>([]);
   const [showTaskModal, setShowTaskModal] = useState(false);
-  const [editingTask, setEditingTask] = useState<any | null>(null);
+  const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
+
   const [taskTitle, setTaskTitle] = useState('');
   const [taskDescription, setTaskDescription] = useState('');
-  const [taskStatus, setTaskStatus] = useState<'todo' | 'in_progress' | 'completed'>('todo');
-  const [taskAssigneeId, setTaskAssigneeId] = useState<string>('');
+  const [taskStatus, setTaskStatus] = useState<TaskStatus>('todo');
+  const [taskAssigneeId, setTaskAssigneeId] = useState('');
+  const [taskPriority, setTaskPriority] = useState<TaskPriority>('medium');
+  const [taskDueDate, setTaskDueDate] = useState('');
+
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | TaskStatus>('all');
+  const [assigneeFilter, setAssigneeFilter] = useState<'all' | 'mine'>('all');
+  const [priorityFilter, setPriorityFilter] = useState<'all' | TaskPriority>('all');
+
   const { user, userProfile } = useUser();
 
   useEffect(() => {
     const q = query(collection(db, 'groups', groupId, 'tasks'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setTasks(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, error => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/tasks`));
+    const unsubscribe = onSnapshot(
+      q,
+      (snap) => setTasks(snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<TaskItem, 'id'>) }))),
+      (error) => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/tasks`),
+    );
     return () => unsubscribe();
   }, [groupId]);
 
@@ -202,8 +290,8 @@ function TasksView({ groupId }: { groupId: string }) {
     const q = query(collection(db, 'groups', groupId, 'members'), orderBy('joinedAt', 'asc'));
     const unsubscribe = onSnapshot(
       q,
-      (snap) => setMembers(snap.docs.map((docSnap) => ({ id: docSnap.id, ...docSnap.data() }))),
-      (error) => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/members`)
+      (snap) => setMembers(snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<GroupMember, 'id'>) }))),
+      (error) => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/members`),
     );
     return () => unsubscribe();
   }, [groupId]);
@@ -212,6 +300,33 @@ function TasksView({ groupId }: { groupId: string }) {
     if (!taskAssigneeId && user?.uid) setTaskAssigneeId(user.uid);
   }, [taskAssigneeId, user?.uid]);
 
+  const filteredTasks = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return tasks.filter((task) => {
+      const matchesSearch =
+        !term ||
+        task.title?.toLowerCase().includes(term) ||
+        task.description?.toLowerCase().includes(term);
+      const matchesStatus = statusFilter === 'all' || task.status === statusFilter;
+      const matchesAssignee = assigneeFilter === 'all' || task.assigneeId === user?.uid;
+      const matchesPriority = priorityFilter === 'all' || (task.priority ?? 'medium') === priorityFilter;
+      return matchesSearch && matchesStatus && matchesAssignee && matchesPriority;
+    });
+  }, [tasks, search, statusFilter, assigneeFilter, priorityFilter, user?.uid]);
+
+  const summary = useMemo(() => {
+    const todo = tasks.filter((t) => t.status === 'todo').length;
+    const inProgress = tasks.filter((t) => t.status === 'in_progress').length;
+    const completed = tasks.filter((t) => t.status === 'completed').length;
+    const overdue = tasks.filter((t) => t.dueDate && t.status !== 'completed' && t.dueDate < todayIsoDate()).length;
+    return { todo, inProgress, completed, overdue };
+  }, [tasks]);
+
+  const memberLabelById = (memberId: string) => {
+    const m = members.find((x) => x.id === memberId);
+    return m?.displayName || m?.email || memberId;
+  };
+
   const openCreateTask = () => {
     if (!user) return;
     setEditingTask(null);
@@ -219,15 +334,19 @@ function TasksView({ groupId }: { groupId: string }) {
     setTaskDescription('');
     setTaskStatus('todo');
     setTaskAssigneeId(user.uid);
+    setTaskPriority('medium');
+    setTaskDueDate('');
     setShowTaskModal(true);
   };
 
-  const openEditTask = (task: any) => {
+  const openEditTask = (task: TaskItem) => {
     setEditingTask(task);
     setTaskTitle(task.title || '');
     setTaskDescription(task.description || '');
     setTaskStatus(task.status || 'todo');
     setTaskAssigneeId(task.assigneeId || user?.uid || '');
+    setTaskPriority(task.priority || 'medium');
+    setTaskDueDate(task.dueDate || '');
     setShowTaskModal(true);
   };
 
@@ -237,23 +356,24 @@ function TasksView({ groupId }: { groupId: string }) {
     if (!taskTitle.trim()) return;
     if (!taskAssigneeId) return;
 
+    const payload = {
+      title: taskTitle.trim(),
+      description: taskDescription.trim(),
+      assigneeId: taskAssigneeId,
+      status: taskStatus,
+      priority: taskPriority,
+      dueDate: taskDueDate || null,
+    };
+
     try {
       if (editingTask) {
-        await updateDoc(doc(db, 'groups', groupId, 'tasks', editingTask.id), {
-          title: taskTitle.trim(),
-          description: taskDescription.trim(),
-          assigneeId: taskAssigneeId,
-          status: taskStatus
-        });
+        await updateDoc(doc(db, 'groups', groupId, 'tasks', editingTask.id), payload);
       } else {
         const taskId = uuidv4();
         await setDoc(doc(db, 'groups', groupId, 'tasks', taskId), {
-          title: taskTitle.trim(),
-          description: taskDescription.trim(),
-          assigneeId: taskAssigneeId,
-          status: taskStatus,
+          ...payload,
           createdAt: serverTimestamp(),
-          createdBy: user.uid
+          createdBy: user.uid,
         });
       }
 
@@ -264,10 +384,9 @@ function TasksView({ groupId }: { groupId: string }) {
     }
   };
 
-  const toggleTask = async (task: any) => {
+  const toggleTask = async (task: TaskItem) => {
     try {
-      const next =
-        task.status === 'todo' ? 'in_progress' : task.status === 'in_progress' ? 'completed' : 'todo';
+      const next: TaskStatus = task.status === 'todo' ? 'in_progress' : task.status === 'in_progress' ? 'completed' : 'todo';
       await updateDoc(doc(db, 'groups', groupId, 'tasks', task.id), { status: next });
     } catch (error) {
       handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}/tasks`);
@@ -285,65 +404,122 @@ function TasksView({ groupId }: { groupId: string }) {
     }
   };
 
-  const memberLabelById = (memberId: string) => {
-    const m = members.find((x) => x.id === memberId);
-    return m?.displayName || m?.email || memberId;
+  const priorityBadge = (priority?: TaskPriority) => {
+    const value = priority || 'medium';
+    const classMap: Record<TaskPriority, string> = {
+      low: 'text-emerald-300 border-emerald-300/50',
+      medium: 'text-amber-300 border-amber-300/50',
+      high: 'text-red-300 border-red-300/50',
+    };
+    return <span className={clsx('px-2 py-1 text-[9px] border uppercase tracking-widest font-bold', classMap[value])}>{value}</span>;
   };
 
   return (
     <div className="font-sans">
-      <div className="mb-8 flex items-center justify-between gap-4">
-        <div>
-          <h3 className="text-[10px] font-black uppercase tracking-widest text-white/40">Tasks</h3>
-          <p className="text-[10px] text-white/30 uppercase tracking-widest mt-1">Create, assign, and track progress</p>
-        </div>
-        <button
-          type="button"
-          onClick={openCreateTask}
-          className="border border-white bg-white text-black px-8 py-3 text-[10px] font-bold uppercase transition-colors hover:bg-black hover:text-white"
-        >
-          New Task
-        </button>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        <StatCard label="Todo" value={summary.todo} />
+        <StatCard label="In Progress" value={summary.inProgress} />
+        <StatCard label="Completed" value={summary.completed} />
+        <StatCard label="Overdue" value={summary.overdue} danger={summary.overdue > 0} />
       </div>
-      
-      <div className="flex flex-col gap-3">
-        {tasks.map(task => (
-          <div
-            key={task.id}
-            className="flex items-center gap-4 p-5 border border-white/[0.15] bg-white/[0.02] hover:border-white/40 transition-colors cursor-pointer"
-            role="button"
-            tabIndex={0}
-            onClick={() => openEditTask(task)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') openEditTask(task);
-            }}
-          >
-            <button 
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleTask(task);
-              }}
-              type="button"
-              aria-label="Change task status"
-              title="Change status"
-              className={clsx("w-5 h-5 border flex items-center justify-center shrink-0 transition-colors", 
-                task.status === 'completed' ? "border-white bg-white text-black" : "border-white/40 hover:border-white"
-              )}
-            >
-              {task.status === 'completed' && <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="square" strokeLinejoin="miter"><polyline points="20 6 9 17 4 12"></polyline></svg>}
-              {task.status === 'in_progress' && <div className="w-2 h-2 bg-white rounded-full" />}
-            </button>
-            <div className="flex flex-col gap-1 flex-1 min-w-0">
-               <span className={clsx("text-sm font-bold uppercase tracking-tight truncate", task.status === 'completed' && "text-white/40 line-through")}>
-                 {task.title}
-               </span>
-               <span className="text-[10px] text-white/40 uppercase tracking-widest truncate">
-                 Assigned: {memberLabelById(task.assigneeId)}
-               </span>
-            </div>
+
+      <div className="mb-6 p-4 border border-white/20 bg-white/[0.02] flex flex-col gap-3">
+        <div className="flex flex-col md:flex-row gap-3">
+          <div className="flex-1 relative">
+            <Search className="w-4 h-4 text-white/40 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search tasks"
+              className="w-full pl-9 pr-3 py-3 bg-transparent border border-white/20 text-xs uppercase tracking-widest focus:border-white outline-none"
+            />
           </div>
-        ))}
-        {tasks.length === 0 && <p className="text-white/40 text-[10px] uppercase font-bold tracking-widest pt-8 border-t border-white/10 text-center">No tasks assigned</p>}
+
+          <button
+            type="button"
+            onClick={openCreateTask}
+            className="border border-white bg-white text-black px-6 py-3 text-[10px] font-bold uppercase transition-colors hover:bg-black hover:text-white"
+          >
+            New Task
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-widest font-bold">
+          <span className="text-white/40 inline-flex items-center gap-1"><Filter className="w-3 h-3" />Filters</span>
+          <FilterChip label="All" active={statusFilter === 'all'} onClick={() => setStatusFilter('all')} />
+          <FilterChip label="Todo" active={statusFilter === 'todo'} onClick={() => setStatusFilter('todo')} />
+          <FilterChip label="In Progress" active={statusFilter === 'in_progress'} onClick={() => setStatusFilter('in_progress')} />
+          <FilterChip label="Completed" active={statusFilter === 'completed'} onClick={() => setStatusFilter('completed')} />
+          <FilterChip label="My Tasks" active={assigneeFilter === 'mine'} onClick={() => setAssigneeFilter(assigneeFilter === 'mine' ? 'all' : 'mine')} />
+          <FilterChip label="High Priority" active={priorityFilter === 'high'} onClick={() => setPriorityFilter(priorityFilter === 'high' ? 'all' : 'high')} />
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        {filteredTasks.map((task) => {
+          const overdue = Boolean(task.dueDate && task.status !== 'completed' && task.dueDate < todayIsoDate());
+          return (
+            <div
+              key={task.id}
+              className={clsx(
+                'flex items-start gap-4 p-5 border bg-white/[0.02] transition-colors cursor-pointer',
+                overdue ? 'border-red-500/40' : 'border-white/[0.15] hover:border-white/40',
+              )}
+              role="button"
+              tabIndex={0}
+              onClick={() => openEditTask(task)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') openEditTask(task);
+              }}
+            >
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void toggleTask(task);
+                }}
+                type="button"
+                aria-label="Change task status"
+                title="Change status"
+                className={clsx(
+                  'w-5 h-5 border flex items-center justify-center shrink-0 mt-1 transition-colors',
+                  task.status === 'completed' ? 'border-white bg-white text-black' : 'border-white/40 hover:border-white',
+                )}
+              >
+                {task.status === 'completed' && <CheckCircle2 className="w-3 h-3" />}
+                {task.status === 'in_progress' && <Circle className="w-3 h-3 fill-white" />}
+              </button>
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between gap-3">
+                  <span className={clsx('text-sm font-bold uppercase tracking-tight truncate', task.status === 'completed' && 'text-white/40 line-through')}>
+                    {task.title}
+                  </span>
+                  {priorityBadge(task.priority)}
+                </div>
+
+                {task.description && (
+                  <p className="text-[11px] text-white/60 mt-2 line-clamp-2">{task.description}</p>
+                )}
+
+                <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px] text-white/45 uppercase tracking-widest font-bold">
+                  <span>Assigned: {memberLabelById(task.assigneeId)}</span>
+                  {task.dueDate && (
+                    <span className={clsx('inline-flex items-center gap-1', overdue ? 'text-red-300' : '')}>
+                      <Calendar className="w-3 h-3" /> Due {task.dueDate}
+                    </span>
+                  )}
+                  {overdue && <span className="inline-flex items-center gap-1 text-red-300"><AlertTriangle className="w-3 h-3" />Overdue</span>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {filteredTasks.length === 0 && (
+          <p className="text-white/40 text-[10px] uppercase font-bold tracking-widest pt-8 border-t border-white/10 text-center">
+            No tasks match your filters
+          </p>
+        )}
       </div>
 
       {showTaskModal && (
@@ -360,7 +536,7 @@ function TasksView({ groupId }: { groupId: string }) {
                 className="text-white/40 hover:text-white transition-colors"
                 aria-label="Close"
               >
-                ✕
+                X
               </button>
             </div>
 
@@ -411,7 +587,7 @@ function TasksView({ groupId }: { groupId: string }) {
                   <label className="block text-[10px] font-bold text-white/40 uppercase tracking-widest mb-2">Status</label>
                   <select
                     value={taskStatus}
-                    onChange={(e) => setTaskStatus(e.target.value as any)}
+                    onChange={(e) => setTaskStatus(e.target.value as TaskStatus)}
                     className="w-full bg-black border border-white/20 p-3 text-[10px] uppercase tracking-widest font-bold outline-none focus:border-white"
                   >
                     <option value="todo">TODO</option>
@@ -419,13 +595,36 @@ function TasksView({ groupId }: { groupId: string }) {
                     <option value="completed">COMPLETED</option>
                   </select>
                 </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-white/40 uppercase tracking-widest mb-2">Priority</label>
+                  <select
+                    value={taskPriority}
+                    onChange={(e) => setTaskPriority(e.target.value as TaskPriority)}
+                    className="w-full bg-black border border-white/20 p-3 text-[10px] uppercase tracking-widest font-bold outline-none focus:border-white"
+                  >
+                    <option value="low">LOW</option>
+                    <option value="medium">MEDIUM</option>
+                    <option value="high">HIGH</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-white/40 uppercase tracking-widest mb-2">Due Date</label>
+                  <input
+                    type="date"
+                    value={taskDueDate}
+                    onChange={(e) => setTaskDueDate(e.target.value)}
+                    className="w-full bg-black border border-white/20 p-3 text-[10px] uppercase tracking-widest font-bold outline-none focus:border-white"
+                  />
+                </div>
               </div>
 
               <div className="flex items-center justify-between pt-2">
                 {editingTask ? (
                   <button
                     type="button"
-                    onClick={deleteTask}
+                    onClick={() => void deleteTask()}
                     className="px-6 py-3 border border-red-500/60 text-red-400 text-xs font-bold uppercase hover:bg-red-500/10 transition-colors"
                   >
                     Delete
@@ -462,17 +661,41 @@ function TasksView({ groupId }: { groupId: string }) {
   );
 }
 
+function FilterChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={clsx(
+        'px-3 py-1 border transition-colors',
+        active ? 'border-white bg-white text-black' : 'border-white/30 text-white/70 hover:border-white hover:text-white',
+      )}
+    >
+      {label}
+    </button>
+  );
+}
+
+function StatCard({ label, value, danger }: { label: string; value: number; danger?: boolean }) {
+  return (
+    <div className={clsx('border p-4 bg-white/[0.02]', danger ? 'border-red-500/40' : 'border-white/15')}>
+      <div className="text-[10px] uppercase tracking-widest text-white/50 font-bold">{label}</div>
+      <div className={clsx('text-2xl font-black mt-2', danger ? 'text-red-300' : 'text-white')}>{value}</div>
+    </div>
+  );
+}
+
 function AdminView({ groupId }: { groupId: string }) {
   const { user } = useUser();
   const [groupName, setGroupName] = useState('');
-  const [members, setMembers] = useState<any[]>([]);
+  const [members, setMembers] = useState<GroupMember[]>([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(
       doc(db, 'groups', groupId),
-      (snap) => setGroupName((snap.data() as any)?.name || ''),
-      (error) => handleFirestoreError(error, OperationType.GET, `groups/${groupId}`)
+      (snap) => setGroupName(((snap.data() as GroupData | undefined)?.name ?? '')),
+      (error) => handleFirestoreError(error, OperationType.GET, `groups/${groupId}`),
     );
     return () => unsubscribe();
   }, [groupId]);
@@ -481,8 +704,8 @@ function AdminView({ groupId }: { groupId: string }) {
     const q = query(collection(db, 'groups', groupId, 'members'), orderBy('joinedAt', 'asc'));
     const unsubscribe = onSnapshot(
       q,
-      (snap) => setMembers(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
-      (error) => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/members`)
+      (snap) => setMembers(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<GroupMember, 'id'>) }))),
+      (error) => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/members`),
     );
     return () => unsubscribe();
   }, [groupId]);
@@ -512,7 +735,7 @@ function AdminView({ groupId }: { groupId: string }) {
     try {
       await Promise.all([
         deleteDoc(doc(db, 'groups', groupId, 'members', memberId)),
-        deleteDoc(doc(db, 'users', memberId, 'memberships', groupId))
+        deleteDoc(doc(db, 'users', memberId, 'memberships', groupId)),
       ]);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `groups/${groupId}/members/${memberId}`);
@@ -545,25 +768,14 @@ function AdminView({ groupId }: { groupId: string }) {
       </form>
 
       <div className="border border-white/20 p-6 bg-white/[0.02]">
-        <div className="flex items-center justify-between gap-4 mb-6">
-          <div>
-            <h3 className="text-[10px] font-black uppercase tracking-widest text-white/40">Members</h3>
-            <p className="text-[10px] text-white/30 uppercase tracking-widest mt-1">Promote, demote, or remove</p>
-          </div>
-        </div>
-
+        <h3 className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-6">Members</h3>
         <div className="space-y-3">
           {members.map((m) => {
             const isSelf = m.id === user?.uid;
             return (
-              <div
-                key={m.id}
-                className="border border-white/10 p-4 flex flex-col md:flex-row md:items-center gap-4 justify-between"
-              >
+              <div key={m.id} className="border border-white/10 p-4 flex flex-col md:flex-row md:items-center gap-4 justify-between">
                 <div className="min-w-0">
-                  <div className="text-xs font-bold uppercase tracking-tight truncate">
-                    {m.displayName || m.email || m.id}
-                  </div>
+                  <div className="text-xs font-bold uppercase tracking-tight truncate">{m.displayName || m.email || m.id}</div>
                   <div className="text-[10px] text-white/40 uppercase tracking-widest truncate">
                     {m.email || m.id} · Role: {m.role}
                   </div>
@@ -573,7 +785,7 @@ function AdminView({ groupId }: { groupId: string }) {
                   <button
                     type="button"
                     disabled={m.role === 'owner'}
-                    onClick={() => setRole(m.id, 'owner')}
+                    onClick={() => void setRole(m.id, 'owner')}
                     className="px-4 py-2 border border-white/20 text-white text-[10px] font-bold uppercase tracking-widest hover:bg-white hover:text-black disabled:opacity-50 transition-colors"
                   >
                     Make Owner
@@ -581,7 +793,7 @@ function AdminView({ groupId }: { groupId: string }) {
                   <button
                     type="button"
                     disabled={m.role === 'member'}
-                    onClick={() => setRole(m.id, 'member')}
+                    onClick={() => void setRole(m.id, 'member')}
                     className="px-4 py-2 border border-white/20 text-white text-[10px] font-bold uppercase tracking-widest hover:bg-white hover:text-black disabled:opacity-50 transition-colors"
                   >
                     Make Member
@@ -589,7 +801,7 @@ function AdminView({ groupId }: { groupId: string }) {
                   <button
                     type="button"
                     disabled={isSelf}
-                    onClick={() => removeMember(m.id)}
+                    onClick={() => void removeMember(m.id)}
                     className="px-4 py-2 border border-red-500/60 text-red-400 text-[10px] font-bold uppercase tracking-widest hover:bg-red-500/10 disabled:opacity-50 transition-colors"
                     title={isSelf ? 'You cannot remove yourself' : 'Remove member'}
                   >
@@ -599,9 +811,7 @@ function AdminView({ groupId }: { groupId: string }) {
               </div>
             );
           })}
-          {members.length === 0 && (
-            <p className="text-white/40 text-[10px] uppercase font-bold tracking-widest">No members found.</p>
-          )}
+          {members.length === 0 && <p className="text-white/40 text-[10px] uppercase font-bold tracking-widest">No members found.</p>}
         </div>
       </div>
     </div>
@@ -609,17 +819,32 @@ function AdminView({ groupId }: { groupId: string }) {
 }
 
 function ChatView({ groupId }: { groupId: string }) {
-  const [messages, setMessages] = useState<any[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [members, setMembers] = useState<GroupMember[]>([]);
   const [newMessage, setNewMessage] = useState('');
-  const { user, userProfile } = useUser();
+  const { user } = useUser();
 
   useEffect(() => {
     const q = query(collection(db, 'groups', groupId, 'messages'), orderBy('createdAt', 'asc'));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setMessages(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, error => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/messages`));
+    const unsubscribe = onSnapshot(
+      q,
+      (snap) => setMessages(snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<ChatMessage, 'id'>) }))),
+      (error) => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/messages`),
+    );
     return () => unsubscribe();
   }, [groupId]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'groups', groupId, 'members'), orderBy('joinedAt', 'asc'));
+    const unsubscribe = onSnapshot(
+      q,
+      (snap) => setMembers(snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<GroupMember, 'id'>) }))),
+      (error) => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/members`),
+    );
+    return () => unsubscribe();
+  }, [groupId]);
+
+  const senderLabel = (id: string) => members.find((m) => m.id === id)?.displayName || members.find((m) => m.id === id)?.email || 'Teammate';
 
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -629,7 +854,7 @@ function ChatView({ groupId }: { groupId: string }) {
       await setDoc(doc(db, 'groups', groupId, 'messages', msgId), {
         text: newMessage.trim(),
         senderId: user.uid,
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
       });
       setNewMessage('');
     } catch (error) {
@@ -640,30 +865,36 @@ function ChatView({ groupId }: { groupId: string }) {
   return (
     <div className="flex flex-col h-[65vh] border border-white/20 bg-white/[0.01] overflow-hidden font-sans">
       <div className="flex-1 overflow-auto p-6 flex flex-col gap-6">
-        {messages.map(msg => {
+        {messages.map((msg) => {
           const isMine = msg.senderId === user?.uid;
           return (
-            <div key={msg.id} className={clsx("flex flex-col", isMine ? "items-end" : "items-start")}>
-              <div className="flex items-end gap-2 max-w-[85%]">
-                {!isMine && <div className="w-6 h-6 border border-white/30 flex items-center justify-center text-[8px] font-bold uppercase shrink-0">U</div>}
-                <div className={clsx("px-4 py-3 text-xs", isMine ? "bg-white text-black font-medium" : "border border-white/20")}>
-                  {msg.text}
-                </div>
+            <div key={msg.id} className={clsx('flex flex-col gap-1', isMine ? 'items-end' : 'items-start')}>
+              <span className="text-[10px] uppercase tracking-widest text-white/40">
+                {isMine ? 'You' : senderLabel(msg.senderId)} · {formatTimestamp(msg.createdAt)}
+              </span>
+              <div className={clsx('px-4 py-3 text-xs max-w-[85%]', isMine ? 'bg-white text-black font-medium' : 'border border-white/20')}>
+                {msg.text}
               </div>
             </div>
           );
         })}
-        {messages.length === 0 && <p className="text-white/30 text-[10px] uppercase font-bold tracking-widest text-center mt-auto mb-auto">Start the communication</p>}
+        {messages.length === 0 && (
+          <p className="text-white/30 text-[10px] uppercase font-bold tracking-widest text-center mt-auto mb-auto">Start the communication</p>
+        )}
       </div>
       <form onSubmit={sendMessage} className="p-4 border-t border-white/20 bg-black flex gap-3">
-        <input 
-          type="text" 
+        <input
+          type="text"
           value={newMessage}
-          onChange={e => setNewMessage(e.target.value)}
+          onChange={(e) => setNewMessage(e.target.value)}
           placeholder="SEND MESSAGE..."
           className="flex-1 bg-transparent border border-white/20 px-4 py-3 focus:border-white outline-none text-[10px] uppercase font-bold tracking-widest placeholder:text-white/30"
         />
-        <button type="submit" disabled={!newMessage.trim()} className="px-6 border border-white bg-white text-black font-bold text-[10px] uppercase tracking-widest disabled:opacity-50 hover:bg-black hover:text-white transition-colors">
+        <button
+          type="submit"
+          disabled={!newMessage.trim()}
+          className="px-6 border border-white bg-white text-black font-bold text-[10px] uppercase tracking-widest disabled:opacity-50 hover:bg-black hover:text-white transition-colors"
+        >
           Send
         </button>
       </form>
@@ -672,75 +903,112 @@ function ChatView({ groupId }: { groupId: string }) {
 }
 
 function DocsView({ groupId }: { groupId: string }) {
-  const [docs, setDocs] = useState<any[]>([]);
+  const [docs, setDocs] = useState<LinkedDoc[]>([]);
   const [title, setTitle] = useState('');
   const [url, setUrl] = useState('');
+  const [error, setError] = useState('');
   const { user } = useUser();
 
   useEffect(() => {
     const q = query(collection(db, 'groups', groupId, 'documents'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snap) => {
-      setDocs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, error => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/documents`));
+    const unsubscribe = onSnapshot(
+      q,
+      (snap) => setDocs(snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<LinkedDoc, 'id'>) }))),
+      (err) => handleFirestoreError(err, OperationType.LIST, `groups/${groupId}/documents`),
+    );
     return () => unsubscribe();
   }, [groupId]);
 
   const addDocLink = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     if (!title.trim() || !url.trim() || !user) return;
+
+    if (!/^https:\/\//i.test(url.trim())) {
+      setError('Only HTTPS links are allowed.');
+      return;
+    }
+
     try {
       const docId = uuidv4();
       await setDoc(doc(db, 'groups', groupId, 'documents', docId), {
         title: title.trim(),
         url: url.trim(),
         createdAt: serverTimestamp(),
-        createdBy: user.uid
+        createdBy: user.uid,
       });
       setTitle('');
       setUrl('');
-    } catch (error) {
-       handleFirestoreError(error, OperationType.CREATE, `groups/${groupId}/documents`);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `groups/${groupId}/documents`);
+    }
+  };
+
+  const removeDoc = async (docId: string) => {
+    try {
+      await deleteDoc(doc(db, 'groups', groupId, 'documents', docId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `groups/${groupId}/documents/${docId}`);
     }
   };
 
   return (
     <div className="font-sans">
       <form onSubmit={addDocLink} className="mb-10 flex flex-col md:flex-row gap-4 border border-white/20 p-6 bg-white/[0.02]">
-        <input 
-          type="text" 
+        <input
+          type="text"
           value={title}
-          onChange={e => setTitle(e.target.value)}
+          onChange={(e) => setTitle(e.target.value)}
           placeholder="TITLE (E.G. SPECS)"
           className="flex-1 bg-transparent border border-white/20 px-4 py-3 text-[10px] uppercase font-bold tracking-widest focus:border-white outline-none placeholder:text-white/30"
         />
         <div className="flex flex-1 gap-4">
-          <input 
-            type="url" 
+          <input
+            type="url"
             value={url}
-            onChange={e => setUrl(e.target.value)}
+            onChange={(e) => setUrl(e.target.value)}
             placeholder="URL (HTTPS://...)"
             className="flex-1 bg-transparent border border-white/20 px-4 py-3 text-[10px] uppercase font-bold tracking-widest focus:border-white outline-none placeholder:text-white/30"
           />
-          <button type="submit" disabled={!title.trim() || !url.trim()} className="px-6 py-3 border border-white bg-white text-black font-bold text-[10px] uppercase transition-colors hover:bg-black hover:text-white disabled:opacity-50 shrink-0">
+          <button
+            type="submit"
+            disabled={!title.trim() || !url.trim()}
+            className="px-6 py-3 border border-white bg-white text-black font-bold text-[10px] uppercase transition-colors hover:bg-black hover:text-white disabled:opacity-50 shrink-0"
+          >
             Link
           </button>
         </div>
       </form>
-      
+
+      {error && <p className="text-red-400 text-[10px] font-bold uppercase tracking-widest mb-4">{error}</p>}
+
       <div className="space-y-4">
         <div className="flex items-center justify-between pb-2 border-b border-white/20 mb-4">
           <h3 className="text-[10px] font-black uppercase tracking-widest text-white/40">Linked Items</h3>
         </div>
         <ul className="space-y-4">
-          {docs.map(doc => (
-            <li key={doc.id}>
-              <a href={doc.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-4 group">
-                <div className="w-2 h-2 bg-white flex-shrink-0 group-hover:scale-150 transition-transform"></div>
-                <span className="text-xs font-bold uppercase tracking-tight group-hover:underline">{doc.title}</span>
-                <span className="text-[10px] text-white/30 truncate max-w-[200px] ml-auto">{doc.url}</span>
-              </a>
-            </li>
-          ))}
+          {docs.map((item) => {
+            const canDelete = item.createdBy === user?.uid;
+            return (
+              <li key={item.id} className="flex items-center gap-3 border border-white/10 p-4">
+                <a href={item.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-4 group min-w-0 flex-1">
+                  <div className="w-2 h-2 bg-white flex-shrink-0 group-hover:scale-150 transition-transform" />
+                  <span className="text-xs font-bold uppercase tracking-tight group-hover:underline truncate">{item.title}</span>
+                  <span className="text-[10px] text-white/30 truncate ml-auto">{item.url}</span>
+                </a>
+                {canDelete && (
+                  <button
+                    type="button"
+                    onClick={() => void removeDoc(item.id)}
+                    className="p-2 border border-red-500/40 text-red-300 hover:bg-red-500/10 transition-colors"
+                    title="Remove link"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ul>
         {docs.length === 0 && <p className="text-white/40 text-[10px] uppercase font-bold tracking-widest mt-8">No documents linked.</p>}
       </div>

@@ -14,9 +14,9 @@ export default function Layout({ children, title }: { children: ReactNode; title
   };
 
   return (
-    <div className="flex h-screen w-full bg-black text-white font-sans overflow-hidden">
+    <div className="flex h-screen w-full bg-gradient-to-br from-black via-zinc-950 to-zinc-900 text-white font-sans overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-64 border-r border-white/20 hidden md:flex flex-col">
+      <aside className="w-64 border-r border-white/20 hidden md:flex flex-col bg-black/40 backdrop-blur-sm">
         <div className="p-8 border-b border-white/20">
           <Link to="/" className="block">
             <h1 className="text-3xl font-bold tracking-tighter uppercase leading-none">SYNQ</h1>
@@ -64,7 +64,7 @@ export default function Layout({ children, title }: { children: ReactNode; title
         </header>
 
         {title && (
-          <div className="h-20 px-8 border-b border-white/20 flex items-center justify-between bg-black sticky top-0 z-10 w-full">
+          <div className="h-20 px-8 border-b border-white/20 flex items-center justify-between bg-black/70 backdrop-blur-sm sticky top-0 z-10 w-full">
             {title}
           </div>
         )}

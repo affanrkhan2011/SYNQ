@@ -4,7 +4,7 @@ import { db, auth, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useUser } from '../components/AuthProvider';
 import Layout from '../components/Layout';
 import { Link, useNavigate } from 'react-router-dom';
-import { Plus, Users, ArrowRight, X } from 'lucide-react';
+import { Plus, Users, ArrowRight, X, Search } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid'; // need to install uuid or just use a random string. Let's use crypto.randomUUID()
                               
 export default function Dashboard() {
@@ -15,6 +15,7 @@ export default function Dashboard() {
   const [newProjectName, setNewProjectName] = useState('');
   const [createError, setCreateError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [search, setSearch] = useState('');
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -94,6 +95,10 @@ export default function Dashboard() {
     }
   };
 
+  const filteredMemberships = memberships.filter((membership) =>
+    membership.groupName?.toLowerCase().includes(search.trim().toLowerCase()),
+  );
+
   return (
     <Layout>
       <div className="flex items-center justify-between mb-8 pb-4 border-b border-white/20">
@@ -108,6 +113,31 @@ export default function Dashboard() {
           <Plus className="w-4 h-4" />
           New Project
         </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="border border-white/20 bg-white/[0.02] p-4">
+          <p className="text-[10px] uppercase tracking-widest text-white/50 font-bold">Total Projects</p>
+          <p className="text-3xl font-black mt-2">{memberships.length}</p>
+        </div>
+        <div className="border border-white/20 bg-white/[0.02] p-4">
+          <p className="text-[10px] uppercase tracking-widest text-white/50 font-bold">Team Presence</p>
+          <p className="text-sm uppercase mt-3">{userProfile?.displayName || user?.email || 'User'}</p>
+        </div>
+        <div className="border border-white/20 bg-white/[0.02] p-4">
+          <p className="text-[10px] uppercase tracking-widest text-white/50 font-bold">Quick Tip</p>
+          <p className="text-xs text-white/70 mt-3">Use project share links to onboard teammates instantly.</p>
+        </div>
+      </div>
+
+      <div className="mb-8 relative">
+        <Search className="w-4 h-4 text-white/40 absolute left-3 top-1/2 -translate-y-1/2" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search projects"
+          className="w-full bg-transparent border border-white/20 pl-9 pr-3 py-3 text-xs uppercase tracking-widest focus:border-white outline-none"
+        />
       </div>
 
       {loading ? (
@@ -130,7 +160,7 @@ export default function Dashboard() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {memberships.map((membership) => (
+          {filteredMemberships.map((membership) => (
             <Link 
               key={membership.id} 
               to={`/groups/${membership.groupId}`}
@@ -149,6 +179,11 @@ export default function Dashboard() {
               </div>
             </Link>
           ))}
+          {filteredMemberships.length === 0 && (
+            <div className="col-span-full border border-white/20 p-8 text-center text-white/50 text-xs uppercase tracking-widest">
+              No projects match your search.
+            </div>
+          )}
         </div>
       )}
 

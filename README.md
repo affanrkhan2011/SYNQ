@@ -8,33 +8,34 @@ Team project management site for student groups.
 
 ## Local dev
 
-**Prerequisites:** Node.js + a Firebase project (Auth + Firestore)
+**Prerequisites:** Node.js + a Firebase project (Auth)
 
 1. Install deps: `npm install`
 2. Create `.env.local` using `.env.example` and fill in the `VITE_FIREBASE_*` values from Firebase Console.
 3. Run: `npm run dev`
 
-## Firestore rules
+## Deploy (Render)
 
-Deploy `firestore.rules` in Firebase Console (or via the Firebase CLI) so tasks/chat/docs/admin features can read/write.
+- Build command: `npm run render-build`
+- Start command: `npm start`
 
-## Deploy (Vercel)
+### Environment variables (Render frontend + API)
 
-- Framework: `Vite`
-- Build command: `npm run build`
-- Output directory: `dist`
-- SPA routing: handled by `vercel.json` (deep links like `/groups/:groupId` work on refresh)
-
-### Environment variables (Firebase)
-
-Set these in Vercel Project Settings -> Environment Variables:
+Set these in Render service Environment:
 
 - `VITE_FIREBASE_API_KEY`
 - `VITE_FIREBASE_AUTH_DOMAIN`
 - `VITE_FIREBASE_PROJECT_ID`
-- `VITE_FIREBASE_STORAGE_BUCKET`
-- `VITE_FIREBASE_MESSAGING_SENDER_ID`
 - `VITE_FIREBASE_APP_ID`
 - `VITE_FIREBASE_MEASUREMENT_ID` (optional)
+- `VITE_API_BASE_URL` (optional, leave empty when frontend and API are same service)
+- `DATABASE_URL` (Render Postgres connection string)
+- `FIREBASE_SERVICE_ACCOUNT_JSON` (full Firebase service account JSON as one-line string)
 
-Also add your Vercel domain in Firebase Console -> Authentication -> Settings -> Authorized domains.
+Also add your Render domain in Firebase Console -> Authentication -> Settings -> Authorized domains.
+
+## Migration note
+
+- Firebase Auth remains active.
+- Project persistence (`/api/projects`) now runs through Render API + Postgres.
+- Group tasks/chat/docs are still on Firestore and can be migrated in a follow-up pass.

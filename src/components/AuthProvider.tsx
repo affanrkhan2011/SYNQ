@@ -1,9 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
-import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import LoadingOverlay from './LoadingOverlay';
-import { pingFirestore } from '../lib/firestoreConnection';
+import { upsertMe } from '../lib/api';
 
 interface UserContextType {
   user: User | null;
@@ -21,86 +20,36 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
   const [dbConnecting, setDbConnecting] = useState(true);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function ping() {
-      setDbConnecting(true);
-      try {
-        await pingFirestore();
-      } catch {
-        // Swallow: offline/unreachable should not crash the app; pages already handle offline errors.
-      } finally {
-        if (!cancelled) setDbConnecting(false);
-      }
-    }
-
-    // Initial boot ping + re-ping on reconnect / tab focus.
-    void ping();
-    const onOnline = () => void ping();
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') void ping();
-    };
-    window.addEventListener('online', onOnline);
-    document.addEventListener('visibilitychange', onVisibility);
-
-    return () => {
-      cancelled = true;
-      window.removeEventListener('online', onOnline);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, []);
-
-  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (userDoc) => {
       setUser(userDoc);
       if (userDoc) {
         setDbConnecting(true);
         try {
-          const userRef = doc(db, 'users', userDoc.uid);
-          const userSnap = await getDoc(userRef);
-          
-          if (!userSnap.exists()) {
-            // Check if name consists of first and last name from displayName
-            const names = userDoc.displayName ? userDoc.displayName.split(' ') : ['First', 'Last'];
-            const firstName = names[0] || 'Unknown';
-            const lastName = names.slice(1).join(' ') || 'User';
+          const names = userDoc.displayName ? userDoc.displayName.split(' ') : ['First', 'Last'];
+          const firstName = names[0] || 'Unknown';
+          const lastName = names.slice(1).join(' ') || 'User';
+          const profilePayload = {
+            email: userDoc.email || '',
+            firstName,
+            lastName,
+            displayName: userDoc.displayName || 'Unknown User',
+          };
 
-            const newUserData = {
-              email: userDoc.email || '',
-              firstName: firstName,
-              lastName: lastName,
-              displayName: userDoc.displayName || 'Unknown User',
-              createdAt: serverTimestamp()
-            };
-            
-            await setDoc(userRef, newUserData).catch(err => {
-              if (err instanceof Error && err.message.includes('offline')) {
-                console.warn('Firestore is offline. Could not save user data.');
-              } else {
-                handleFirestoreError(err, OperationType.CREATE, `users/${userDoc.uid}`);
-              }
-            });
-            setUserProfile(newUserData);
-          } else {
-            setUserProfile(userSnap.data());
-          }
+          await upsertMe({
+            email: profilePayload.email,
+            displayName: profilePayload.displayName,
+          });
+
+          setUserProfile(profilePayload);
         } catch (error) {
-           if (error instanceof Error && error.message.includes('offline')) {
-              console.warn('Firestore is offline. Proceeding with default user profile.');
-              // Fallback to basic user profile based on auth data so the app still works!
-              const names = userDoc.displayName ? userDoc.displayName.split(' ') : ['First', 'Last'];
-              setUserProfile({
-                  email: userDoc.email || '',
-                  firstName: names[0] || 'Unknown',
-                  lastName: names.slice(1).join(' ') || 'User',
-                  displayName: userDoc.displayName || 'Unknown User',
-                  isOffline: true
-              });
-           } else {
-              handleFirestoreError(error, OperationType.GET, `users/${userDoc.uid}`);
-              // Provide default profile to avoid crash
-              setUserProfile({ displayName: 'User (Offline Error)' });
-           }
+          handleFirestoreError(error, OperationType.GET, `users/${userDoc.uid}`);
+          const names = userDoc.displayName ? userDoc.displayName.split(' ') : ['First', 'Last'];
+          setUserProfile({
+            email: userDoc.email || '',
+            firstName: names[0] || 'Unknown',
+            lastName: names.slice(1).join(' ') || 'User',
+            displayName: userDoc.displayName || 'Unknown User',
+          });
         }
         setDbConnecting(false);
       } else {

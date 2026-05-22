@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { collection, onSnapshot, doc, setDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { db, auth, OperationType, handleFirestoreError } from '../lib/firebase';
+import { auth, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useUser } from '../components/AuthProvider';
 import Layout from '../components/Layout';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Users, ArrowRight, X, Search } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid'; // need to install uuid or just use a random string. Let's use crypto.randomUUID()
+import { createProject, listProjects } from '../lib/api';
                               
 export default function Dashboard() {
   const { user, userProfile } = useUser();
@@ -20,23 +20,20 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!user) return;
-    
-    // Fetch memberships for this user
-    const userMembershipsRef = collection(db, 'users', user.uid, 'memberships');
-    const unsubscribe = onSnapshot(userMembershipsRef, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setMemberships(data);
-      setLoading(false);
-    }, (error) => {
-      if (error instanceof Error && error.message.includes('offline')) {
-        console.warn('Firestore is offline. Could not load memberships.');
-      } else {
+
+    const loadMemberships = async () => {
+      try {
+        setLoading(true);
+        const data = await listProjects();
+        setMemberships(data);
+      } catch (error) {
         handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/memberships`);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
-    });
-    
-    return () => unsubscribe();
+    };
+
+    void loadMemberships();
   }, [user]);
 
   const handleCreateProject = async (e: React.FormEvent) => {
@@ -48,34 +45,21 @@ export default function Dashboard() {
 
     try {
       const projectId = uuidv4();
-      const batch = writeBatch(db);
-
-      // Create project
-      const groupRef = doc(db, 'groups', projectId);
-      batch.set(groupRef, {
+      const created = await createProject({
+        id: projectId,
         name: newProjectName.trim(),
-        ownerId: user.uid,
-        createdAt: serverTimestamp()
-      });
-
-      // Add user to project members
-      const memberRef = doc(db, 'groups', projectId, 'members', user.uid);
-      batch.set(memberRef, {
-        role: 'owner',
-        joinedAt: serverTimestamp(),
         displayName: userProfile?.displayName || user.displayName || 'User',
-        email: userProfile?.email || user.email || ''
+        email: userProfile?.email || user.email || '',
       });
 
-      // Add membership pointer to user
-      const userMembershipRef = doc(db, 'users', user.uid, 'memberships', projectId);
-      batch.set(userMembershipRef, {
-        groupId: projectId,
-        groupName: newProjectName.trim(),
-        joinedAt: serverTimestamp()
-      });
-
-      await batch.commit();
+      setMemberships((prev) => [
+        {
+          id: created.groupId,
+          groupId: created.groupId,
+          groupName: created.groupName,
+        },
+        ...prev,
+      ]);
 
       // Close the modal and reset form
       setShowNewProjectModal(false);
@@ -86,7 +70,7 @@ export default function Dashboard() {
       setTimeout(() => {
         setIsCreating(false);
         // Using `replace` avoids leaving the modal page state in history.
-        navigate(`/groups/${projectId}`, { replace: true });
+        navigate(`/groups/${created.groupId}`, { replace: true });
       }, 100);
     } catch (error: any) {
       setIsCreating(false);

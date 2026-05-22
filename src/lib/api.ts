@@ -26,11 +26,25 @@ async function request(path: string, init: RequestInit = {}) {
   });
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.error || `Request failed (${response.status})`);
+    const text = await response.text().catch(() => '');
+    let message = `Request failed (${response.status})`;
+    try {
+      const payload = text ? JSON.parse(text) : {};
+      if (payload?.error) message = payload.error;
+    } catch {
+      if (text) message = `${message}: ${text.slice(0, 200)}`;
+    }
+    throw new Error(message);
   }
 
-  return response.json();
+  // Some endpoints may return an empty body (e.g. 204) or non-JSON in edge cases.
+  const text = await response.text().catch(() => '');
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 export async function upsertMe(payload: { email: string; displayName: string }) {
@@ -55,4 +69,3 @@ export async function createProject(payload: {
     body: JSON.stringify(payload),
   });
 }
-

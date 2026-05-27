@@ -1,6 +1,9 @@
 import { auth } from './firebase';
 
 const getApiBase = () => {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
   // If we are in production and running on the same domain as the server, it will be relative.
   // In Vite dev mode, we usually need the absolute URL or a proxy, but assuming the Node backend is on port 3000
   // or via VITE_API_URL. Let's use the current origin if not localhost, otherwise localhost:3000

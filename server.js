@@ -369,14 +369,22 @@ app.get('*', (_, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-bootstrap()
-  .then(() => {
-    app.listen(port, () => {
-      console.log(`Server listening on ${port}`);
+if (!process.env.VERCEL) {
+  bootstrap()
+    .then(() => {
+      app.listen(port, () => {
+        console.log(`Server listening on ${port}`);
+      });
+    })
+    .catch((error) => {
+      console.error('Bootstrap failed', error);
+      process.exit(1);
     });
-  })
-  .catch((error) => {
+} else {
+  bootstrap().catch((error) => {
     console.error('Bootstrap failed', error);
-    process.exit(1);
   });
+}
+
+export default app;
 

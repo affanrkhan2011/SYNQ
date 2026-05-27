@@ -9,6 +9,7 @@ import { UserProvider, useUser } from './components/AuthProvider';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import GroupPage from './pages/Group';
+import AuthCallback from './pages/AuthCallback';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useUser();
@@ -23,6 +24,7 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
           <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/groups/:groupId" element={<ProtectedRoute><GroupPage /></ProtectedRoute>} />
         </Routes>

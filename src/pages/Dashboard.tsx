@@ -1,11 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { auth, OperationType, handleFirestoreError } from '../lib/firebase';
 import { useUser } from '../components/AuthProvider';
 import Layout from '../components/Layout';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Users, ArrowRight, X, Search } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid'; // need to install uuid or just use a random string. Let's use crypto.randomUUID()
-import { createProject, listProjects } from '../lib/api';
+import { createProject, listProjects } from '../lib/db';
                               
 export default function Dashboard() {
   const { user, userProfile } = useUser();
@@ -27,7 +26,7 @@ export default function Dashboard() {
         const data = await listProjects();
         setMemberships(data);
       } catch (error) {
-        handleFirestoreError(error, OperationType.LIST, `users/${user.uid}/memberships`);
+        console.error(error);
       } finally {
         setLoading(false);
       }
@@ -48,8 +47,6 @@ export default function Dashboard() {
       const created = await createProject({
         id: projectId,
         name: newProjectName.trim(),
-        displayName: userProfile?.displayName || user.displayName || 'User',
-        email: userProfile?.email || user.email || '',
       });
 
       setMemberships((prev) => [
@@ -74,12 +71,7 @@ export default function Dashboard() {
       }, 100);
     } catch (error: any) {
       setIsCreating(false);
-      handleFirestoreError(error, OperationType.CREATE, `groups/create`);
-      if (error?.code === 'permission-denied') {
-        setCreateError('Permission denied. Please ensure your Firestore Database is created and security rules are updated.');
-      } else {
-        setCreateError(error?.message || 'Failed to create project.');
-      }
+      setCreateError(error?.message || 'Failed to create project.');
     }
   };
 

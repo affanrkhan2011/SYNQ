@@ -1,21 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import {
-  doc,
-  getDoc,
-  setDoc,
-  collection,
-  onSnapshot,
-  query,
-  orderBy,
-  serverTimestamp,
-  updateDoc,
-  writeBatch,
-  deleteDoc,
-} from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { useUser } from '../components/AuthProvider';
 import Layout from '../components/Layout';
+import { useUser } from '../components/AuthProvider';
+import { supabase } from '../lib/supabaseClient';
 import { CheckCircle2, Circle, Search, Filter, AlertTriangle, Calendar, Trash2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { v4 as uuidv4 } from 'uuid';
@@ -37,23 +24,23 @@ interface TaskItem {
   assigneeId: string;
   status: TaskStatus;
   priority?: TaskPriority;
-  dueDate?: string;
-  createdAt?: any;
-  createdBy?: string;
+  dueDate?: string | null;
+  createdAt?: string | null;
+  createdBy?: string | null;
 }
 
 interface GroupMember {
   id: string;
   role: 'owner' | 'member';
-  displayName?: string;
-  email?: string;
+  displayName?: string | null;
+  email?: string | null;
 }
 
 interface ChatMessage {
   id: string;
   text: string;
   senderId: string;
-  createdAt?: any;
+  createdAt?: string | null;
 }
 
 interface LinkedDoc {
@@ -61,12 +48,12 @@ interface LinkedDoc {
   title: string;
   url: string;
   createdBy: string;
-  createdAt?: any;
+  createdAt?: string | null;
 }
 
 const formatTimestamp = (value: any) => {
-  const date = value?.toDate?.() ?? null;
-  if (!date) return 'Just now';
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return 'Just now';
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
@@ -79,7 +66,7 @@ const todayIsoDate = () => new Date().toISOString().split('T')[0];
 
 export default function GroupPage() {
   const { groupId } = useParams();
-  const { user, userProfile } = useUser();
+  const { user } = useUser();
   const navigate = useNavigate();
 
   const [group, setGroup] = useState<GroupData | null>(null);
@@ -93,60 +80,56 @@ export default function GroupPage() {
   useEffect(() => {
     if (!user || !groupId) return;
 
-    let unsubscribeMember: (() => void) | undefined;
-
-    const loadGroup = async () => {
+    const load = async () => {
       try {
-        const groupRef = doc(db, 'groups', groupId);
-        const groupSnap = await getDoc(groupRef);
+        setLoading(true);
 
-        if (!groupSnap.exists()) {
+        const { data: project, error: projectError } = await supabase
+          .from('projects')
+          .select('*')
+          .eq('id', groupId)
+          .single();
+        if (projectError || !project) {
           navigate('/');
           return;
         }
 
-        setGroup({ id: groupSnap.id, ...(groupSnap.data() as Omit<GroupData, 'id'>) });
+        setGroup({ id: project.id, name: project.name, ownerId: project.owner_id });
 
-        const memberRef = doc(db, 'groups', groupId, 'members', user.uid);
-        unsubscribeMember = onSnapshot(memberRef, (snap) => {
-          setIsMember(snap.exists());
-          setMemberRole((snap.data() as GroupMember | undefined)?.role ?? null);
-          setLoading(false);
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.GET, `groups/${groupId}`);
+        const { data: membership, error: membershipError } = await supabase
+          .from('memberships')
+          .select('*')
+          .eq('project_id', groupId)
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (membershipError) throw membershipError;
+
+        setIsMember(Boolean(membership));
+        setMemberRole((membership?.role as any) ?? null);
+      } catch (err) {
+        console.error(err);
+      } finally {
         setLoading(false);
       }
     };
 
-    void loadGroup();
-
-    return () => {
-      if (unsubscribeMember) unsubscribeMember();
-    };
+    void load();
   }, [groupId, user, navigate]);
 
   const handleJoin = async () => {
     if (!user || !groupId || !group) return;
     try {
-      const batch = writeBatch(db);
-
-      batch.set(doc(db, 'groups', groupId, 'members', user.uid), {
+      const { error } = await supabase.from('memberships').insert({
+        user_id: user.id,
+        project_id: groupId,
         role: 'member',
-        joinedAt: serverTimestamp(),
-        displayName: userProfile?.displayName || user.displayName || 'User',
-        email: userProfile?.email || user.email || '',
       });
+      if (error) throw error;
 
-      batch.set(doc(db, 'users', user.uid, 'memberships', groupId), {
-        groupId,
-        groupName: group.name,
-        joinedAt: serverTimestamp(),
-      });
-
-      await batch.commit();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `groups/${groupId}/members`);
+      setIsMember(true);
+      setMemberRole('member');
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -257,6 +240,7 @@ export default function GroupPage() {
 }
 
 function TasksView({ groupId }: { groupId: string }) {
+  const { user } = useUser();
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [showTaskModal, setShowTaskModal] = useState(false);
@@ -274,45 +258,64 @@ function TasksView({ groupId }: { groupId: string }) {
   const [assigneeFilter, setAssigneeFilter] = useState<'all' | 'mine'>('all');
   const [priorityFilter, setPriorityFilter] = useState<'all' | TaskPriority>('all');
 
-  const { user, userProfile } = useUser();
+  const loadTasks = async () => {
+    const { data, error } = await supabase
+      .from('tasks')
+      .select('*')
+      .eq('project_id', groupId)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    setTasks(
+      (data || []).map((t: any) => ({
+        id: t.id,
+        title: t.title,
+        description: t.description || '',
+        assigneeId: t.assignee_id,
+        status: t.status,
+        priority: t.priority || 'medium',
+        dueDate: t.due_date,
+        createdAt: t.created_at,
+        createdBy: t.created_by,
+      })),
+    );
+  };
+
+  const loadMembers = async () => {
+    const { data, error } = await supabase
+      .from('memberships')
+      .select('user_id, role, users(id, email, display_name)')
+      .eq('project_id', groupId);
+    if (error) throw error;
+    setMembers(
+      (data || []).map((m: any) => ({
+        id: m.user_id,
+        role: m.role,
+        displayName: m.users?.display_name,
+        email: m.users?.email,
+      })),
+    );
+  };
 
   useEffect(() => {
-    const q = query(collection(db, 'groups', groupId, 'tasks'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snap) => setTasks(snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<TaskItem, 'id'>) }))),
-      (error) => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/tasks`),
-    );
-    return () => unsubscribe();
+    void loadTasks().catch(console.error);
+    void loadMembers().catch(console.error);
   }, [groupId]);
 
   useEffect(() => {
-    const q = query(collection(db, 'groups', groupId, 'members'), orderBy('joinedAt', 'asc'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snap) => setMembers(snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<GroupMember, 'id'>) }))),
-      (error) => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/members`),
-    );
-    return () => unsubscribe();
-  }, [groupId]);
-
-  useEffect(() => {
-    if (!taskAssigneeId && user?.uid) setTaskAssigneeId(user.uid);
-  }, [taskAssigneeId, user?.uid]);
+    if (!taskAssigneeId && user?.id) setTaskAssigneeId(user.id);
+  }, [taskAssigneeId, user?.id]);
 
   const filteredTasks = useMemo(() => {
     const term = search.trim().toLowerCase();
     return tasks.filter((task) => {
       const matchesSearch =
-        !term ||
-        task.title?.toLowerCase().includes(term) ||
-        task.description?.toLowerCase().includes(term);
+        !term || task.title?.toLowerCase().includes(term) || task.description?.toLowerCase().includes(term);
       const matchesStatus = statusFilter === 'all' || task.status === statusFilter;
-      const matchesAssignee = assigneeFilter === 'all' || task.assigneeId === user?.uid;
+      const matchesAssignee = assigneeFilter === 'all' || task.assigneeId === user?.id;
       const matchesPriority = priorityFilter === 'all' || (task.priority ?? 'medium') === priorityFilter;
       return matchesSearch && matchesStatus && matchesAssignee && matchesPriority;
     });
-  }, [tasks, search, statusFilter, assigneeFilter, priorityFilter, user?.uid]);
+  }, [tasks, search, statusFilter, assigneeFilter, priorityFilter, user?.id]);
 
   const summary = useMemo(() => {
     const todo = tasks.filter((t) => t.status === 'todo').length;
@@ -333,7 +336,7 @@ function TasksView({ groupId }: { groupId: string }) {
     setTaskTitle('');
     setTaskDescription('');
     setTaskStatus('todo');
-    setTaskAssigneeId(user.uid);
+    setTaskAssigneeId(user.id);
     setTaskPriority('medium');
     setTaskDueDate('');
     setShowTaskModal(true);
@@ -344,7 +347,7 @@ function TasksView({ groupId }: { groupId: string }) {
     setTaskTitle(task.title || '');
     setTaskDescription(task.description || '');
     setTaskStatus(task.status || 'todo');
-    setTaskAssigneeId(task.assigneeId || user?.uid || '');
+    setTaskAssigneeId(task.assigneeId || user?.id || '');
     setTaskPriority(task.priority || 'medium');
     setTaskDueDate(task.dueDate || '');
     setShowTaskModal(true);
@@ -356,52 +359,43 @@ function TasksView({ groupId }: { groupId: string }) {
     if (!taskTitle.trim()) return;
     if (!taskAssigneeId) return;
 
-    const payload = {
+    const payload: any = {
+      id: editingTask?.id || uuidv4(),
+      project_id: groupId,
       title: taskTitle.trim(),
       description: taskDescription.trim(),
-      assigneeId: taskAssigneeId,
+      assignee_id: taskAssigneeId,
       status: taskStatus,
       priority: taskPriority,
-      dueDate: taskDueDate || null,
+      due_date: taskDueDate || null,
+      created_by: editingTask?.createdBy || user.id,
     };
 
-    try {
-      if (editingTask) {
-        await updateDoc(doc(db, 'groups', groupId, 'tasks', editingTask.id), payload);
-      } else {
-        const taskId = uuidv4();
-        await setDoc(doc(db, 'groups', groupId, 'tasks', taskId), {
-          ...payload,
-          createdAt: serverTimestamp(),
-          createdBy: user.uid,
-        });
-      }
-
-      setShowTaskModal(false);
-      setEditingTask(null);
-    } catch (error) {
-      handleFirestoreError(error, editingTask ? OperationType.UPDATE : OperationType.CREATE, `groups/${groupId}/tasks`);
+    const { error } = await supabase.from('tasks').upsert(payload);
+    if (error) {
+      console.error(error);
+      return;
     }
+
+    await loadTasks().catch(console.error);
+    setShowTaskModal(false);
+    setEditingTask(null);
   };
 
   const toggleTask = async (task: TaskItem) => {
-    try {
-      const next: TaskStatus = task.status === 'todo' ? 'in_progress' : task.status === 'in_progress' ? 'completed' : 'todo';
-      await updateDoc(doc(db, 'groups', groupId, 'tasks', task.id), { status: next });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}/tasks`);
-    }
+    const next: TaskStatus = task.status === 'todo' ? 'in_progress' : task.status === 'in_progress' ? 'completed' : 'todo';
+    const { error } = await supabase.from('tasks').update({ status: next }).eq('id', task.id);
+    if (error) console.error(error);
+    await loadTasks().catch(console.error);
   };
 
   const deleteTask = async () => {
     if (!editingTask) return;
-    try {
-      await deleteDoc(doc(db, 'groups', groupId, 'tasks', editingTask.id));
-      setShowTaskModal(false);
-      setEditingTask(null);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `groups/${groupId}/tasks`);
-    }
+    const { error } = await supabase.from('tasks').delete().eq('id', editingTask.id);
+    if (error) console.error(error);
+    await loadTasks().catch(console.error);
+    setShowTaskModal(false);
+    setEditingTask(null);
   };
 
   const priorityBadge = (priority?: TaskPriority) => {
@@ -577,8 +571,8 @@ function TasksView({ groupId }: { groupId: string }) {
                         {(m.displayName || m.email || m.id).toString()}
                       </option>
                     ))}
-                    {members.length === 0 && user?.uid && (
-                      <option value={user.uid}>{userProfile?.displayName || user.email || user.uid}</option>
+                    {members.length === 0 && user?.id && (
+                      <option value={user.id}>{user.email || user.id}</option>
                     )}
                   </select>
                 </div>
@@ -691,23 +685,27 @@ function AdminView({ groupId }: { groupId: string }) {
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    const unsubscribe = onSnapshot(
-      doc(db, 'groups', groupId),
-      (snap) => setGroupName(((snap.data() as GroupData | undefined)?.name ?? '')),
-      (error) => handleFirestoreError(error, OperationType.GET, `groups/${groupId}`),
+  const load = async () => {
+    const { data: project, error: projectError } = await supabase.from('projects').select('*').eq('id', groupId).single();
+    if (!projectError && project) setGroupName(project.name);
+
+    const { data, error } = await supabase
+      .from('memberships')
+      .select('user_id, role, users(id, email, display_name)')
+      .eq('project_id', groupId);
+    if (error) throw error;
+    setMembers(
+      (data || []).map((m: any) => ({
+        id: m.user_id,
+        role: m.role,
+        displayName: m.users?.display_name,
+        email: m.users?.email,
+      })),
     );
-    return () => unsubscribe();
-  }, [groupId]);
+  };
 
   useEffect(() => {
-    const q = query(collection(db, 'groups', groupId, 'members'), orderBy('joinedAt', 'asc'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snap) => setMembers(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<GroupMember, 'id'>) }))),
-      (error) => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/members`),
-    );
-    return () => unsubscribe();
+    void load().catch(console.error);
   }, [groupId]);
 
   const saveGroupName = async (e: React.FormEvent) => {
@@ -715,9 +713,10 @@ function AdminView({ groupId }: { groupId: string }) {
     if (!groupName.trim()) return;
     try {
       setSaving(true);
-      await updateDoc(doc(db, 'groups', groupId), { name: groupName.trim() });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}`);
+      const { error } = await supabase.from('projects').update({ name: groupName.trim() }).eq('id', groupId);
+      if (error) throw error;
+    } catch (err) {
+      console.error(err);
     } finally {
       setSaving(false);
     }
@@ -725,20 +724,29 @@ function AdminView({ groupId }: { groupId: string }) {
 
   const setRole = async (memberId: string, role: 'owner' | 'member') => {
     try {
-      await updateDoc(doc(db, 'groups', groupId, 'members', memberId), { role });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `groups/${groupId}/members/${memberId}`);
+      const { error } = await supabase
+        .from('memberships')
+        .update({ role })
+        .eq('project_id', groupId)
+        .eq('user_id', memberId);
+      if (error) throw error;
+      await load();
+    } catch (err) {
+      console.error(err);
     }
   };
 
   const removeMember = async (memberId: string) => {
     try {
-      await Promise.all([
-        deleteDoc(doc(db, 'groups', groupId, 'members', memberId)),
-        deleteDoc(doc(db, 'users', memberId, 'memberships', groupId)),
-      ]);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `groups/${groupId}/members/${memberId}`);
+      const { error } = await supabase
+        .from('memberships')
+        .delete()
+        .eq('project_id', groupId)
+        .eq('user_id', memberId);
+      if (error) throw error;
+      await load();
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -771,7 +779,7 @@ function AdminView({ groupId }: { groupId: string }) {
         <h3 className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-6">Members</h3>
         <div className="space-y-3">
           {members.map((m) => {
-            const isSelf = m.id === user?.uid;
+            const isSelf = m.id === user?.id;
             return (
               <div key={m.id} className="border border-white/10 p-4 flex flex-col md:flex-row md:items-center gap-4 justify-between">
                 <div className="min-w-0">
@@ -819,29 +827,32 @@ function AdminView({ groupId }: { groupId: string }) {
 }
 
 function ChatView({ groupId }: { groupId: string }) {
+  const { user } = useUser();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [members, setMembers] = useState<GroupMember[]>([]);
   const [newMessage, setNewMessage] = useState('');
-  const { user } = useUser();
+
+  const load = async () => {
+    const { data: msgData, error: msgError } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('project_id', groupId)
+      .order('created_at', { ascending: true });
+    if (msgError) throw msgError;
+    setMessages((msgData || []).map((m: any) => ({ id: m.id, text: m.text, senderId: m.sender_id, createdAt: m.created_at })));
+
+    const { data: memberData, error: memberError } = await supabase
+      .from('memberships')
+      .select('user_id, role, users(id, email, display_name)')
+      .eq('project_id', groupId);
+    if (memberError) throw memberError;
+    setMembers(
+      (memberData || []).map((m: any) => ({ id: m.user_id, role: m.role, displayName: m.users?.display_name, email: m.users?.email })),
+    );
+  };
 
   useEffect(() => {
-    const q = query(collection(db, 'groups', groupId, 'messages'), orderBy('createdAt', 'asc'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snap) => setMessages(snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<ChatMessage, 'id'>) }))),
-      (error) => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/messages`),
-    );
-    return () => unsubscribe();
-  }, [groupId]);
-
-  useEffect(() => {
-    const q = query(collection(db, 'groups', groupId, 'members'), orderBy('joinedAt', 'asc'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snap) => setMembers(snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<GroupMember, 'id'>) }))),
-      (error) => handleFirestoreError(error, OperationType.LIST, `groups/${groupId}/members`),
-    );
-    return () => unsubscribe();
+    void load().catch(console.error);
   }, [groupId]);
 
   const senderLabel = (id: string) => members.find((m) => m.id === id)?.displayName || members.find((m) => m.id === id)?.email || 'Teammate';
@@ -849,24 +860,26 @@ function ChatView({ groupId }: { groupId: string }) {
   const sendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim() || !user) return;
-    try {
-      const msgId = uuidv4();
-      await setDoc(doc(db, 'groups', groupId, 'messages', msgId), {
-        text: newMessage.trim(),
-        senderId: user.uid,
-        createdAt: serverTimestamp(),
-      });
-      setNewMessage('');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, `groups/${groupId}/messages`);
+    const msgId = uuidv4();
+    const { error } = await supabase.from('messages').insert({
+      id: msgId,
+      project_id: groupId,
+      text: newMessage.trim(),
+      sender_id: user.id,
+    });
+    if (error) {
+      console.error(error);
+      return;
     }
+    setNewMessage('');
+    await load().catch(console.error);
   };
 
   return (
     <div className="flex flex-col h-[65vh] border border-white/20 bg-white/[0.01] overflow-hidden font-sans">
       <div className="flex-1 overflow-auto p-6 flex flex-col gap-6">
         {messages.map((msg) => {
-          const isMine = msg.senderId === user?.uid;
+          const isMine = msg.senderId === user?.id;
           return (
             <div key={msg.id} className={clsx('flex flex-col gap-1', isMine ? 'items-end' : 'items-start')}>
               <span className="text-[10px] uppercase tracking-widest text-white/40">
@@ -903,53 +916,55 @@ function ChatView({ groupId }: { groupId: string }) {
 }
 
 function DocsView({ groupId }: { groupId: string }) {
+  const { user } = useUser();
   const [docs, setDocs] = useState<LinkedDoc[]>([]);
   const [title, setTitle] = useState('');
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
-  const { user } = useUser();
+
+  const load = async () => {
+    const { data, error: err } = await supabase
+      .from('documents')
+      .select('*')
+      .eq('project_id', groupId)
+      .order('created_at', { ascending: false });
+    if (err) throw err;
+    setDocs((data || []).map((d: any) => ({ id: d.id, title: d.title, url: d.url, createdBy: d.created_by, createdAt: d.created_at })));
+  };
 
   useEffect(() => {
-    const q = query(collection(db, 'groups', groupId, 'documents'), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snap) => setDocs(snap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<LinkedDoc, 'id'>) }))),
-      (err) => handleFirestoreError(err, OperationType.LIST, `groups/${groupId}/documents`),
-    );
-    return () => unsubscribe();
+    void load().catch(console.error);
   }, [groupId]);
 
   const addDocLink = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     if (!title.trim() || !url.trim() || !user) return;
-
     if (!/^https:\/\//i.test(url.trim())) {
       setError('Only HTTPS links are allowed.');
       return;
     }
-
-    try {
-      const docId = uuidv4();
-      await setDoc(doc(db, 'groups', groupId, 'documents', docId), {
-        title: title.trim(),
-        url: url.trim(),
-        createdAt: serverTimestamp(),
-        createdBy: user.uid,
-      });
-      setTitle('');
-      setUrl('');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `groups/${groupId}/documents`);
+    const docId = uuidv4();
+    const { error: err } = await supabase.from('documents').insert({
+      id: docId,
+      project_id: groupId,
+      title: title.trim(),
+      url: url.trim(),
+      created_by: user.id,
+    });
+    if (err) {
+      console.error(err);
+      return;
     }
+    setTitle('');
+    setUrl('');
+    await load().catch(console.error);
   };
 
   const removeDoc = async (docId: string) => {
-    try {
-      await deleteDoc(doc(db, 'groups', groupId, 'documents', docId));
-    } catch (err) {
-      handleFirestoreError(err, OperationType.DELETE, `groups/${groupId}/documents/${docId}`);
-    }
+    const { error: err } = await supabase.from('documents').delete().eq('id', docId);
+    if (err) console.error(err);
+    await load().catch(console.error);
   };
 
   return (
@@ -988,7 +1003,7 @@ function DocsView({ groupId }: { groupId: string }) {
         </div>
         <ul className="space-y-4">
           {docs.map((item) => {
-            const canDelete = item.createdBy === user?.uid;
+            const canDelete = item.createdBy === user?.id;
             return (
               <li key={item.id} className="flex items-center gap-3 border border-white/10 p-4">
                 <a href={item.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-4 group min-w-0 flex-1">
@@ -1015,3 +1030,4 @@ function DocsView({ groupId }: { groupId: string }) {
     </div>
   );
 }
+

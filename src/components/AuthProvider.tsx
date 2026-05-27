@@ -1,57 +1,76 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, onAuthStateChanged } from 'firebase/auth';
-import { auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import LoadingOverlay from './LoadingOverlay';
-import { upsertMe } from '../lib/api';
+import { supabase } from '../lib/supabaseClient';
+import { upsertMe } from '../lib/db';
 
 interface UserContextType {
-  user: User | null;
+  user: any | null;
   loading: boolean;
   userProfile: any | null;
   dbConnecting: boolean;
 }
 
-const UserContext = createContext<UserContextType>({ user: null, loading: true, userProfile: null, dbConnecting: true });
+const UserContext = createContext<UserContextType>({
+  user: null,
+  loading: true,
+  userProfile: null,
+  dbConnecting: true,
+});
 
 export const UserProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<any | null>(null);
   const [userProfile, setUserProfile] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [dbConnecting, setDbConnecting] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (userDoc) => {
-      setUser(userDoc);
-      if (userDoc) {
-        setDbConnecting(true);
-        try {
-          const names = userDoc.displayName ? userDoc.displayName.split(' ') : ['First', 'Last'];
-          const firstName = names[0] || 'Unknown';
-          const lastName = names.slice(1).join(' ') || 'User';
-          const profilePayload = {
-            email: userDoc.email || '',
-            firstName,
-            lastName,
-            displayName: userDoc.displayName || 'Unknown User',
-          };
+    let cancelled = false;
 
-          await upsertMe({
-            email: profilePayload.email,
-            displayName: profilePayload.displayName,
-          });
+    const syncProfile = async (supabaseUser: any) => {
+      setDbConnecting(true);
+      try {
+        const displayName = (supabaseUser?.user_metadata?.full_name ||
+          supabaseUser?.user_metadata?.name ||
+          supabaseUser?.email ||
+          'User') as string;
 
-          setUserProfile(profilePayload);
-        } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${userDoc.uid}`);
-          const names = userDoc.displayName ? userDoc.displayName.split(' ') : ['First', 'Last'];
-          setUserProfile({
-            email: userDoc.email || '',
-            firstName: names[0] || 'Unknown',
-            lastName: names.slice(1).join(' ') || 'User',
-            displayName: userDoc.displayName || 'Unknown User',
-          });
-        }
-        setDbConnecting(false);
+        const names = displayName.split(' ');
+        const firstName = names[0] || 'Unknown';
+        const lastName = names.slice(1).join(' ') || 'User';
+
+        const profilePayload = {
+          email: supabaseUser.email || '',
+          firstName,
+          lastName,
+          displayName,
+        };
+
+        await upsertMe({
+          email: profilePayload.email,
+          displayName: profilePayload.displayName,
+        });
+
+        if (!cancelled) setUserProfile(profilePayload);
+      } finally {
+        if (!cancelled) setDbConnecting(false);
+      }
+    };
+
+    const bootstrap = async () => {
+      const { data } = await supabase.auth.getSession();
+      const supabaseUser = data.session?.user ?? null;
+      if (!cancelled) setUser(supabaseUser);
+      if (supabaseUser) await syncProfile(supabaseUser);
+      if (!cancelled) setLoading(false);
+    };
+
+    void bootstrap();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const supabaseUser = session?.user ?? null;
+      setUser(supabaseUser);
+      if (supabaseUser) {
+        await syncProfile(supabaseUser);
       } else {
         setUserProfile(null);
         setDbConnecting(false);
@@ -59,15 +78,19 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      cancelled = true;
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
   return (
     <UserContext.Provider value={{ user, loading, userProfile, dbConnecting }}>
-      <LoadingOverlay show={dbConnecting} label="Connecting to database…" />
+      <LoadingOverlay show={dbConnecting} label="Connecting to database..." />
       {children}
     </UserContext.Provider>
   );
 };
 
 export const useUser = () => useContext(UserContext);
+

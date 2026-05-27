@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import LoadingOverlay from './LoadingOverlay';
-import { supabase } from '../lib/supabaseClient';
+import { auth } from '../lib/firebase';
+import { onAuthStateChanged, User } from 'firebase/auth';
 import { upsertMe } from '../lib/db';
 
 interface UserContextType {
-  user: any | null;
+  user: User | null;
   loading: boolean;
   userProfile: any | null;
   dbConnecting: boolean;
@@ -18,7 +19,7 @@ const UserContext = createContext<UserContextType>({
 });
 
 export const UserProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<any | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [dbConnecting, setDbConnecting] = useState(true);
@@ -26,20 +27,17 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     let cancelled = false;
 
-    const syncProfile = async (supabaseUser: any) => {
+    const syncProfile = async (firebaseUser: User) => {
       setDbConnecting(true);
       try {
-        const displayName = (supabaseUser?.user_metadata?.full_name ||
-          supabaseUser?.user_metadata?.name ||
-          supabaseUser?.email ||
-          'User') as string;
+        const displayName = (firebaseUser.displayName || firebaseUser.email || 'User') as string;
 
         const names = displayName.split(' ');
         const firstName = names[0] || 'Unknown';
         const lastName = names.slice(1).join(' ') || 'User';
 
         const profilePayload = {
-          email: supabaseUser.email || '',
+          email: firebaseUser.email || '',
           firstName,
           lastName,
           displayName,
@@ -56,21 +54,11 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
       }
     };
 
-    const bootstrap = async () => {
-      const { data } = await supabase.auth.getSession();
-      const supabaseUser = data.session?.user ?? null;
-      if (!cancelled) setUser(supabaseUser);
-      if (supabaseUser) await syncProfile(supabaseUser);
-      if (!cancelled) setLoading(false);
-    };
-
-    void bootstrap();
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      const supabaseUser = session?.user ?? null;
-      setUser(supabaseUser);
-      if (supabaseUser) {
-        await syncProfile(supabaseUser);
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (cancelled) return;
+      setUser(firebaseUser);
+      if (firebaseUser) {
+        await syncProfile(firebaseUser);
       } else {
         setUserProfile(null);
         setDbConnecting(false);
@@ -80,7 +68,7 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
 
     return () => {
       cancelled = true;
-      authListener.subscription.unsubscribe();
+      unsubscribe();
     };
   }, []);
 

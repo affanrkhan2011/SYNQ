@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useUser } from '../components/AuthProvider';
-import { supabase } from '../lib/supabaseClient';
+import * as api from '../lib/api';
 import { CheckCircle2, Circle, Search, Filter, AlertTriangle, Calendar, Trash2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { v4 as uuidv4 } from 'uuid';
@@ -84,11 +84,8 @@ export default function GroupPage() {
       try {
         setLoading(true);
 
-        const { data: project, error: projectError } = await supabase
-          .from('projects')
-          .select('*')
-          .eq('id', groupId)
-          .single();
+        let project = null, projectError = null;
+        try { project = await api.fetchProject(groupId); } catch (e) { projectError = e; }
         if (projectError || !project) {
           navigate('/');
           return;
@@ -96,12 +93,8 @@ export default function GroupPage() {
 
         setGroup({ id: project.id, name: project.name, ownerId: project.owner_id });
 
-        const { data: membership, error: membershipError } = await supabase
-          .from('memberships')
-          .select('*')
-          .eq('project_id', groupId)
-          .eq('user_id', user.id)
-          .maybeSingle();
+        let membership = null, membershipError = null;
+        try { membership = await api.getMembership(groupId); } catch (e) { membershipError = e; }
         if (membershipError) throw membershipError;
 
         setIsMember(Boolean(membership));
@@ -119,11 +112,8 @@ export default function GroupPage() {
   const handleJoin = async () => {
     if (!user || !groupId || !group) return;
     try {
-      const { error } = await supabase.from('memberships').insert({
-        user_id: user.id,
-        project_id: groupId,
-        role: 'member',
-      });
+      let error = null;
+      try { await api.joinProject(groupId); } catch (e) { error = e; }
       if (error) throw error;
 
       setIsMember(true);
@@ -259,11 +249,8 @@ function TasksView({ groupId }: { groupId: string }) {
   const [priorityFilter, setPriorityFilter] = useState<'all' | TaskPriority>('all');
 
   const loadTasks = async () => {
-    const { data, error } = await supabase
-      .from('tasks')
-      .select('*')
-      .eq('project_id', groupId)
-      .order('created_at', { ascending: false });
+    let data = null, error = null;
+    try { data = await api.getTasks(groupId); } catch(e) { error = e; }
     if (error) throw error;
     setTasks(
       (data || []).map((t: any) => ({
@@ -281,10 +268,8 @@ function TasksView({ groupId }: { groupId: string }) {
   };
 
   const loadMembers = async () => {
-    const { data, error } = await supabase
-      .from('memberships')
-      .select('user_id, role, users(id, email, display_name)')
-      .eq('project_id', groupId);
+    let data = null, error = null;
+    try { data = await api.getMembers(groupId); } catch(e) { error = e; }
     if (error) throw error;
     setMembers(
       (data || []).map((m: any) => ({
@@ -371,7 +356,8 @@ function TasksView({ groupId }: { groupId: string }) {
       created_by: editingTask?.createdBy || user.id,
     };
 
-    const { error } = await supabase.from('tasks').upsert(payload);
+    let error = null;
+    try { await api.upsertTask(groupId, payload); } catch(e) { error = e; }
     if (error) {
       console.error(error);
       return;
@@ -384,14 +370,16 @@ function TasksView({ groupId }: { groupId: string }) {
 
   const toggleTask = async (task: TaskItem) => {
     const next: TaskStatus = task.status === 'todo' ? 'in_progress' : task.status === 'in_progress' ? 'completed' : 'todo';
-    const { error } = await supabase.from('tasks').update({ status: next }).eq('id', task.id);
+    let error = null;
+    try { await api.updateTaskStatus(task.id, next); } catch(e) { error = e; }
     if (error) console.error(error);
     await loadTasks().catch(console.error);
   };
 
   const deleteTask = async () => {
     if (!editingTask) return;
-    const { error } = await supabase.from('tasks').delete().eq('id', editingTask.id);
+    let error = null;
+    try { await api.deleteTask(editingTask.id); } catch(e) { error = e; }
     if (error) console.error(error);
     await loadTasks().catch(console.error);
     setShowTaskModal(false);
@@ -686,13 +674,12 @@ function AdminView({ groupId }: { groupId: string }) {
   const [saving, setSaving] = useState(false);
 
   const load = async () => {
-    const { data: project, error: projectError } = await supabase.from('projects').select('*').eq('id', groupId).single();
+    let project = null, projectError = null;
+        try { project = await api.fetchProject(groupId); } catch (e) { projectError = e; }
     if (!projectError && project) setGroupName(project.name);
 
-    const { data, error } = await supabase
-      .from('memberships')
-      .select('user_id, role, users(id, email, display_name)')
-      .eq('project_id', groupId);
+    let data = null, error = null;
+    try { data = await api.getMembers(groupId); } catch(e) { error = e; }
     if (error) throw error;
     setMembers(
       (data || []).map((m: any) => ({
@@ -713,7 +700,8 @@ function AdminView({ groupId }: { groupId: string }) {
     if (!groupName.trim()) return;
     try {
       setSaving(true);
-      const { error } = await supabase.from('projects').update({ name: groupName.trim() }).eq('id', groupId);
+      let error = null;
+      try { await api.updateProject(groupId, groupName.trim()); } catch(e) { error = e; }
       if (error) throw error;
     } catch (err) {
       console.error(err);
@@ -724,11 +712,8 @@ function AdminView({ groupId }: { groupId: string }) {
 
   const setRole = async (memberId: string, role: 'owner' | 'member') => {
     try {
-      const { error } = await supabase
-        .from('memberships')
-        .update({ role })
-        .eq('project_id', groupId)
-        .eq('user_id', memberId);
+      let error = null;
+      try { await api.updateMemberRole(groupId, memberId, role); } catch(e) { error = e; }
       if (error) throw error;
       await load();
     } catch (err) {
@@ -738,11 +723,8 @@ function AdminView({ groupId }: { groupId: string }) {
 
   const removeMember = async (memberId: string) => {
     try {
-      const { error } = await supabase
-        .from('memberships')
-        .delete()
-        .eq('project_id', groupId)
-        .eq('user_id', memberId);
+      let error = null;
+      try { await api.removeMember(groupId, memberId); } catch(e) { error = e; }
       if (error) throw error;
       await load();
     } catch (err) {
@@ -833,18 +815,13 @@ function ChatView({ groupId }: { groupId: string }) {
   const [newMessage, setNewMessage] = useState('');
 
   const load = async () => {
-    const { data: msgData, error: msgError } = await supabase
-      .from('messages')
-      .select('*')
-      .eq('project_id', groupId)
-      .order('created_at', { ascending: true });
+    let msgData = null, msgError = null;
+    try { msgData = await api.getMessages(groupId); } catch(e) { msgError = e; }
     if (msgError) throw msgError;
     setMessages((msgData || []).map((m: any) => ({ id: m.id, text: m.text, senderId: m.sender_id, createdAt: m.created_at })));
 
-    const { data: memberData, error: memberError } = await supabase
-      .from('memberships')
-      .select('user_id, role, users(id, email, display_name)')
-      .eq('project_id', groupId);
+    let memberData = null, memberError = null;
+    try { memberData = await api.getMembers(groupId); } catch(e) { memberError = e; }
     if (memberError) throw memberError;
     setMembers(
       (memberData || []).map((m: any) => ({ id: m.user_id, role: m.role, displayName: m.users?.display_name, email: m.users?.email })),
@@ -861,12 +838,8 @@ function ChatView({ groupId }: { groupId: string }) {
     e.preventDefault();
     if (!newMessage.trim() || !user) return;
     const msgId = uuidv4();
-    const { error } = await supabase.from('messages').insert({
-      id: msgId,
-      project_id: groupId,
-      text: newMessage.trim(),
-      sender_id: user.id,
-    });
+    let error = null;
+    try { await api.sendMessage(groupId, { id: msgId, text: newMessage.trim(), sender_id: user.id }); } catch(e) { error = e; }
     if (error) {
       console.error(error);
       return;
@@ -923,11 +896,8 @@ function DocsView({ groupId }: { groupId: string }) {
   const [error, setError] = useState('');
 
   const load = async () => {
-    const { data, error: err } = await supabase
-      .from('documents')
-      .select('*')
-      .eq('project_id', groupId)
-      .order('created_at', { ascending: false });
+    let data = null, err = null;
+    try { data = await api.getDocuments(groupId); } catch(e) { err = e; }
     if (err) throw err;
     setDocs((data || []).map((d: any) => ({ id: d.id, title: d.title, url: d.url, createdBy: d.created_by, createdAt: d.created_at })));
   };
@@ -945,13 +915,8 @@ function DocsView({ groupId }: { groupId: string }) {
       return;
     }
     const docId = uuidv4();
-    const { error: err } = await supabase.from('documents').insert({
-      id: docId,
-      project_id: groupId,
-      title: title.trim(),
-      url: url.trim(),
-      created_by: user.id,
-    });
+    let err = null;
+    try { await api.addDocument(groupId, { id: docId, title: title.trim(), url: url.trim(), created_by: user.id }); } catch(e) { err = e; }
     if (err) {
       console.error(err);
       return;
@@ -962,7 +927,8 @@ function DocsView({ groupId }: { groupId: string }) {
   };
 
   const removeDoc = async (docId: string) => {
-    const { error: err } = await supabase.from('documents').delete().eq('id', docId);
+    let err = null;
+    try { await api.removeDocument(docId); } catch(e) { err = e; }
     if (err) console.error(err);
     await load().catch(console.error);
   };

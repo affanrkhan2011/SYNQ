@@ -1,7 +1,8 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../components/AuthProvider';
-import { supabase } from '../lib/supabaseClient';
+import { auth, googleProvider } from '../lib/firebase';
+import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 
 export default function Login() {
   const { user, loading } = useUser();
@@ -21,13 +22,10 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     setErrorMsg('');
     try {
-      await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo: window.location.origin + '/auth/callback' },
-      });
+      await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
       console.error("Google Login failed", error);
-      if (error?.message?.includes('cancel')) {
+      if (error?.message?.includes('cancel') || error?.code === 'auth/popup-closed-by-user') {
         setErrorMsg('Login was cancelled. Please try again.');
       } else {
         setErrorMsg(`Failed to sign in: ${error.message}`);
@@ -46,19 +44,18 @@ export default function Login() {
     setIsSubmitting(true);
     try {
       if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        await signInWithEmailAndPassword(auth, email, password);
       } else {
-        const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
+        await createUserWithEmailAndPassword(auth, email, password);
       }
     } catch (error: any) {
       console.error("Email auth failed", error);
-      if (error?.message?.toLowerCase().includes('invalid')) {
+      const msg = error?.message?.toLowerCase() || '';
+      if (msg.includes('invalid') || msg.includes('user-not-found') || msg.includes('wrong-password')) {
         setErrorMsg('Invalid email or password.');
-      } else if (error?.message?.toLowerCase().includes('already')) {
+      } else if (msg.includes('already') || msg.includes('email-already-in-use')) {
         setErrorMsg('An account already exists with this email.');
-      } else if (error?.message?.toLowerCase().includes('password')) {
+      } else if (msg.includes('password') || msg.includes('weak-password')) {
         setErrorMsg('Password should be at least 6 characters.');
       } else {
         setErrorMsg(`Authentication failed: ${error.message}`);

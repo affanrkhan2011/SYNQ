@@ -1,18 +1,11 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
 
 export default function AuthCallback() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const run = async () => {
-      // supabase-js parses the URL hash/query and persists the session.
-      // Calling getSession forces hydration from the callback URL.
-      await supabase.auth.getSession();
-      navigate('/', { replace: true });
-    };
-    void run();
+    navigate('/', { replace: true });
   }, [navigate]);
 
   return (

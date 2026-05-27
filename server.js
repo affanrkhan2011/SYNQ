@@ -82,6 +82,42 @@ const bootstrap = async () => {
       PRIMARY KEY (user_id, project_id)
     );
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      description TEXT,
+      assignee_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      status TEXT NOT NULL DEFAULT 'todo',
+      priority TEXT DEFAULT 'medium',
+      due_date DATE,
+      created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      text TEXT NOT NULL,
+      sender_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS documents (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      url TEXT NOT NULL,
+      created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
 };
 
 app.get('/api/health', async (_, res) => {
@@ -179,6 +215,153 @@ app.post('/api/projects', withAuth, async (req, res) => {
   } finally {
     client.release();
   }
+});
+
+// -- Group Details & Memberships --
+app.get('/api/projects/:id', withAuth, async (req, res) => {
+  const { id } = req.params;
+  const { rows } = await pool.query(`SELECT * FROM projects WHERE id = $1`, [id]);
+  if (!rows.length) return res.status(404).json({ error: 'Not found' });
+  res.json(rows[0]);
+});
+
+app.put('/api/projects/:id', withAuth, async (req, res) => {
+  const { id } = req.params;
+  const { name } = req.body;
+  await pool.query(`UPDATE projects SET name = $1 WHERE id = $2`, [name, id]);
+  res.json({ ok: true });
+});
+
+app.get('/api/projects/:id/members', withAuth, async (req, res) => {
+  const { id } = req.params;
+  const { rows } = await pool.query(
+    `SELECT m.user_id, m.role, u.email, u.display_name
+     FROM memberships m JOIN users u ON m.user_id = u.id
+     WHERE m.project_id = $1`,
+    [id]
+  );
+  res.json(rows);
+});
+
+app.post('/api/projects/:id/members', withAuth, async (req, res) => {
+  const { id } = req.params;
+  const { role } = req.body;
+  await pool.query(
+    `INSERT INTO memberships (user_id, project_id, role) VALUES ($1, $2, $3)`,
+    [req.user.uid, id, role || 'member']
+  );
+  res.json({ ok: true });
+});
+
+app.get('/api/projects/:id/membership', withAuth, async (req, res) => {
+  const { id } = req.params;
+  const { rows } = await pool.query(
+    `SELECT * FROM memberships WHERE project_id = $1 AND user_id = $2`,
+    [id, req.user.uid]
+  );
+  res.json(rows[0] || null);
+});
+
+app.put('/api/projects/:id/members/:userId', withAuth, async (req, res) => {
+  const { id, userId } = req.params;
+  const { role } = req.body;
+  await pool.query(
+    `UPDATE memberships SET role = $1 WHERE project_id = $2 AND user_id = $3`,
+    [role, id, userId]
+  );
+  res.json({ ok: true });
+});
+
+app.delete('/api/projects/:id/members/:userId', withAuth, async (req, res) => {
+  const { id, userId } = req.params;
+  await pool.query(
+    `DELETE FROM memberships WHERE project_id = $1 AND user_id = $2`,
+    [id, userId]
+  );
+  res.json({ ok: true });
+});
+
+// -- Tasks --
+app.get('/api/projects/:id/tasks', withAuth, async (req, res) => {
+  const { id } = req.params;
+  const { rows } = await pool.query(
+    `SELECT * FROM tasks WHERE project_id = $1 ORDER BY created_at DESC`,
+    [id]
+  );
+  res.json(rows);
+});
+
+app.post('/api/projects/:id/tasks', withAuth, async (req, res) => {
+  const { id } = req.params;
+  const t = req.body;
+  await pool.query(
+    `INSERT INTO tasks (id, project_id, title, description, assignee_id, status, priority, due_date, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (id) DO UPDATE SET
+       title = EXCLUDED.title, description = EXCLUDED.description, assignee_id = EXCLUDED.assignee_id,
+       status = EXCLUDED.status, priority = EXCLUDED.priority, due_date = EXCLUDED.due_date`,
+    [t.id, id, t.title, t.description, t.assignee_id, t.status, t.priority, t.due_date, t.created_by]
+  );
+  res.json({ ok: true });
+});
+
+app.put('/api/tasks/:id', withAuth, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  await pool.query(`UPDATE tasks SET status = $1 WHERE id = $2`, [status, id]);
+  res.json({ ok: true });
+});
+
+app.delete('/api/tasks/:id', withAuth, async (req, res) => {
+  const { id } = req.params;
+  await pool.query(`DELETE FROM tasks WHERE id = $1`, [id]);
+  res.json({ ok: true });
+});
+
+// -- Messages --
+app.get('/api/projects/:id/messages', withAuth, async (req, res) => {
+  const { id } = req.params;
+  const { rows } = await pool.query(
+    `SELECT * FROM messages WHERE project_id = $1 ORDER BY created_at ASC`,
+    [id]
+  );
+  res.json(rows);
+});
+
+app.post('/api/projects/:id/messages', withAuth, async (req, res) => {
+  const { id } = req.params;
+  const { id: msgId, text, sender_id } = req.body;
+  await pool.query(
+    `INSERT INTO messages (id, project_id, text, sender_id) VALUES ($1, $2, $3, $4)`,
+    [msgId, id, text, sender_id]
+  );
+  res.json({ ok: true });
+});
+
+// -- Documents --
+app.get('/api/projects/:id/documents', withAuth, async (req, res) => {
+  const { id } = req.params;
+  const { rows } = await pool.query(
+    `SELECT * FROM documents WHERE project_id = $1 ORDER BY created_at DESC`,
+    [id]
+  );
+  res.json(rows);
+});
+
+app.post('/api/projects/:id/documents', withAuth, async (req, res) => {
+  const { id } = req.params;
+  const { id: docId, title, url, created_by } = req.body;
+  await pool.query(
+    `INSERT INTO documents (id, project_id, title, url, created_by) VALUES ($1, $2, $3, $4, $5)`,
+    [docId, id, title, url, created_by]
+  );
+  res.json({ ok: true });
+});
+
+app.delete('/api/documents/:id', withAuth, async (req, res) => {
+  const { id } = req.params;
+  await pool.query(`DELETE FROM documents WHERE id = $1`, [id]);
+  res.json({ ok: true });
 });
 
 app.use(express.static(path.join(__dirname, 'dist')));

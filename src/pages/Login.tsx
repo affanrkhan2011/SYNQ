@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useUser } from '../components/AuthProvider';
 import { supabase } from '../lib/supabaseClient';
 
+const appOrigin = import.meta.env.VITE_SITE_URL || window.location.origin;
+const authCallbackUrl = `${appOrigin}/auth/callback`;
+
 export default function Login() {
   const { user, loading } = useUser();
   const navigate = useNavigate();
@@ -23,10 +26,10 @@ export default function Login() {
     try {
       await supabase.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: `${window.location.origin}/auth/callback` },
+        options: { redirectTo: authCallbackUrl },
       });
     } catch (error: any) {
-      console.error("Google Login failed", error);
+      console.error('Google Login failed', error);
       if (error?.message?.includes('cancel')) {
         setErrorMsg('Login was cancelled. Please try again.');
       } else {
@@ -49,11 +52,15 @@ export default function Login() {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
       } else {
-        const { error } = await supabase.auth.signUp({ email, password });
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: authCallbackUrl },
+        });
         if (error) throw error;
       }
     } catch (error: any) {
-      console.error("Email auth failed", error);
+      console.error('Email auth failed', error);
       const msg = error?.message?.toLowerCase() || '';
       if (msg.includes('invalid') || msg.includes('user-not-found') || msg.includes('wrong-password')) {
         setErrorMsg('Invalid email or password.');

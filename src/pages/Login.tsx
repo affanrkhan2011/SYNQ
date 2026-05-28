@@ -3,9 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useUser } from '../components/AuthProvider';
 import { supabase } from '../lib/supabaseClient';
 
-const appOrigin = import.meta.env.VITE_SITE_URL || window.location.origin;
-const authCallbackUrl = `${appOrigin}/auth/callback`;
-
 export default function Login() {
   const { user, loading } = useUser();
   const navigate = useNavigate();
@@ -24,6 +21,7 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     setErrorMsg('');
     try {
+      const authCallbackUrl = `${window.location.origin}/auth/callback`;
       await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo: authCallbackUrl },
@@ -48,6 +46,7 @@ export default function Login() {
     setErrorMsg('');
     setIsSubmitting(true);
     try {
+      const authCallbackUrl = `${window.location.origin}/auth/callback`;
       if (isLogin) {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;

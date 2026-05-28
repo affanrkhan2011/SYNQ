@@ -48,23 +48,38 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
         });
 
         if (!cancelled) setUserProfile(profilePayload);
+      } catch (error) {
+        console.error('Failed to sync user profile', error);
+        if (!cancelled) setUserProfile(null);
       } finally {
         if (!cancelled) setDbConnecting(false);
       }
     };
 
     const bootstrap = async () => {
-      const { data } = await supabase.auth.getSession();
-      const supabaseUser = data.session?.user ?? null;
-      if (cancelled) return;
-      setUser(supabaseUser);
-      if (supabaseUser) {
-        await syncProfile(supabaseUser);
-      } else {
-        setUserProfile(null);
-        setDbConnecting(false);
+      try {
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+
+        const supabaseUser = data.session?.user ?? null;
+        if (cancelled) return;
+        setUser(supabaseUser);
+        if (supabaseUser) {
+          await syncProfile(supabaseUser);
+        } else {
+          setUserProfile(null);
+          setDbConnecting(false);
+        }
+      } catch (error) {
+        console.error('Failed to initialize auth session', error);
+        if (!cancelled) {
+          setUser(null);
+          setUserProfile(null);
+          setDbConnecting(false);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setLoading(false);
     };
 
     void bootstrap();

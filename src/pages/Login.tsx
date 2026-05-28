@@ -1,8 +1,7 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../components/AuthProvider';
-import { auth, googleProvider } from '../lib/firebase';
-import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { supabase } from '../lib/supabaseClient';
 
 export default function Login() {
   const { user, loading } = useUser();
@@ -22,10 +21,13 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     setErrorMsg('');
     try {
-      await signInWithPopup(auth, googleProvider);
+      await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: `${window.location.origin}/auth/callback` },
+      });
     } catch (error: any) {
       console.error("Google Login failed", error);
-      if (error?.message?.includes('cancel') || error?.code === 'auth/popup-closed-by-user') {
+      if (error?.message?.includes('cancel')) {
         setErrorMsg('Login was cancelled. Please try again.');
       } else {
         setErrorMsg(`Failed to sign in: ${error.message}`);
@@ -44,9 +46,11 @@ export default function Login() {
     setIsSubmitting(true);
     try {
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
       } else {
-        await createUserWithEmailAndPassword(auth, email, password);
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
       }
     } catch (error: any) {
       console.error("Email auth failed", error);

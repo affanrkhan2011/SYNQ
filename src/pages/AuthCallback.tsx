@@ -1,11 +1,21 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
 
 export default function AuthCallback() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    navigate('/', { replace: true });
+    const run = async () => {
+      const { searchParams } = new URL(window.location.href);
+      const code = searchParams.get('code');
+      if (code) {
+        await supabase.auth.exchangeCodeForSession(code);
+      }
+      await supabase.auth.getSession();
+      navigate('/', { replace: true });
+    };
+    void run();
   }, [navigate]);
 
   return (
@@ -14,4 +24,3 @@ export default function AuthCallback() {
     </div>
   );
 }
-

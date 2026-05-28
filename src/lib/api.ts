@@ -1,135 +1,145 @@
-import { auth } from './firebase';
+import { supabase } from './supabaseClient';
 
-const getApiBase = () => {
-  if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL;
-  }
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return '';
-  }
-  return 'http://localhost:3000';
-};
-
-const API_BASE = getApiBase();
-
-async function getAuthHeaders() {
-  const user = auth.currentUser;
+async function currentUserId() {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) throw error;
+  const user = data.user;
   if (!user) throw new Error('No authenticated user');
-  const token = await user.getIdToken();
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`
-  };
+  return user.id;
 }
 
 export async function fetchProject(id: string) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects/${id}`, { headers });
-  if (!res.ok) throw new Error('Failed to fetch project');
-  return res.json();
+  const { data, error } = await supabase.from('projects').select('*').eq('id', id).single();
+  if (error) throw error;
+  return data;
 }
 
 export async function updateProject(id: string, name: string) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects/${id}`, { method: 'PUT', headers, body: JSON.stringify({ name }) });
-  if (!res.ok) throw new Error('Failed to update project');
-  return res.json();
+  const { error } = await supabase.from('projects').update({ name }).eq('id', id);
+  if (error) throw error;
+  return { ok: true };
 }
 
 export async function getMembers(projectId: string) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects/${projectId}/members`, { headers });
-  if (!res.ok) throw new Error('Failed to fetch members');
-  return res.json();
+  const { data, error } = await supabase
+    .from('memberships')
+    .select('user_id, role, created_at, users(id, email, display_name)')
+    .eq('project_id', projectId);
+  if (error) throw error;
+  return data || [];
 }
 
 export async function joinProject(projectId: string) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects/${projectId}/members`, { method: 'POST', headers, body: JSON.stringify({ role: 'member' }) });
-  if (!res.ok) throw new Error('Failed to join project');
-  return res.json();
+  const userId = await currentUserId();
+  const { error } = await supabase.from('memberships').insert({
+    user_id: userId,
+    project_id: projectId,
+    role: 'member',
+  });
+  if (error) throw error;
+  return { ok: true };
 }
 
 export async function getMembership(projectId: string) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects/${projectId}/membership`, { headers });
-  if (!res.ok) return null;
-  return res.json();
+  const userId = await currentUserId();
+  const { data, error } = await supabase
+    .from('memberships')
+    .select('*')
+    .eq('project_id', projectId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
 }
 
 export async function updateMemberRole(projectId: string, userId: string, role: string) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects/${projectId}/members/${userId}`, { method: 'PUT', headers, body: JSON.stringify({ role }) });
-  if (!res.ok) throw new Error('Failed to update role');
-  return res.json();
+  const { error } = await supabase
+    .from('memberships')
+    .update({ role })
+    .eq('project_id', projectId)
+    .eq('user_id', userId);
+  if (error) throw error;
+  return { ok: true };
 }
 
 export async function removeMember(projectId: string, userId: string) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects/${projectId}/members/${userId}`, { method: 'DELETE', headers });
-  if (!res.ok) throw new Error('Failed to remove member');
-  return res.json();
+  const { error } = await supabase.from('memberships').delete().eq('project_id', projectId).eq('user_id', userId);
+  if (error) throw error;
+  return { ok: true };
 }
 
 export async function getTasks(projectId: string) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects/${projectId}/tasks`, { headers });
-  if (!res.ok) throw new Error('Failed to fetch tasks');
-  return res.json();
+  const { data, error } = await supabase.from('tasks').select('*').eq('project_id', projectId).order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
 }
 
 export async function upsertTask(projectId: string, task: any) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects/${projectId}/tasks`, { method: 'POST', headers, body: JSON.stringify(task) });
-  if (!res.ok) throw new Error('Failed to upsert task');
-  return res.json();
+  const { error } = await supabase.from('tasks').upsert({
+    id: task.id,
+    project_id: projectId,
+    title: task.title,
+    description: task.description,
+    assignee_id: task.assignee_id,
+    status: task.status,
+    priority: task.priority,
+    due_date: task.due_date,
+    created_by: task.created_by,
+  });
+  if (error) throw error;
+  return { ok: true };
 }
 
 export async function updateTaskStatus(taskId: string, status: string) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/tasks/${taskId}`, { method: 'PUT', headers, body: JSON.stringify({ status }) });
-  if (!res.ok) throw new Error('Failed to update task status');
-  return res.json();
+  const { error } = await supabase.from('tasks').update({ status }).eq('id', taskId);
+  if (error) throw error;
+  return { ok: true };
 }
 
 export async function deleteTask(taskId: string) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/tasks/${taskId}`, { method: 'DELETE', headers });
-  if (!res.ok) throw new Error('Failed to delete task');
-  return res.json();
+  const { error } = await supabase.from('tasks').delete().eq('id', taskId);
+  if (error) throw error;
+  return { ok: true };
 }
 
 export async function getMessages(projectId: string) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects/${projectId}/messages`, { headers });
-  if (!res.ok) throw new Error('Failed to fetch messages');
-  return res.json();
+  const { data, error } = await supabase.from('messages').select('*').eq('project_id', projectId).order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
 }
 
 export async function sendMessage(projectId: string, message: any) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects/${projectId}/messages`, { method: 'POST', headers, body: JSON.stringify(message) });
-  if (!res.ok) throw new Error('Failed to send message');
-  return res.json();
+  const { error } = await supabase.from('messages').insert({
+    id: message.id,
+    project_id: projectId,
+    text: message.text,
+    sender_id: message.sender_id,
+  });
+  if (error) throw error;
+  return { ok: true };
 }
 
 export async function getDocuments(projectId: string) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects/${projectId}/documents`, { headers });
-  if (!res.ok) throw new Error('Failed to fetch documents');
-  return res.json();
+  const { data, error } = await supabase.from('documents').select('*').eq('project_id', projectId).order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
 }
 
 export async function addDocument(projectId: string, document: any) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects/${projectId}/documents`, { method: 'POST', headers, body: JSON.stringify(document) });
-  if (!res.ok) throw new Error('Failed to add document');
-  return res.json();
+  const { error } = await supabase.from('documents').insert({
+    id: document.id,
+    project_id: projectId,
+    title: document.title,
+    url: document.url,
+    created_by: document.created_by,
+  });
+  if (error) throw error;
+  return { ok: true };
 }
 
 export async function removeDocument(docId: string) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/documents/${docId}`, { method: 'DELETE', headers });
-  if (!res.ok) throw new Error('Failed to delete document');
-  return res.json();
+  const { error } = await supabase.from('documents').delete().eq('id', docId);
+  if (error) throw error;
+  return { ok: true };
 }
+

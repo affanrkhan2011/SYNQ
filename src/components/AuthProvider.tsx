@@ -1,11 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import LoadingOverlay from './LoadingOverlay';
-import { auth } from '../lib/firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
+import { supabase } from '../lib/supabaseClient';
 import { upsertMe } from '../lib/db';
 
 interface UserContextType {
-  user: User | null;
+  user: any | null;
   loading: boolean;
   userProfile: any | null;
   dbConnecting: boolean;
@@ -19,7 +18,7 @@ const UserContext = createContext<UserContextType>({
 });
 
 export const UserProvider = ({ children }: { children: React.ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<any | null>(null);
   const [userProfile, setUserProfile] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [dbConnecting, setDbConnecting] = useState(true);
@@ -27,17 +26,17 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     let cancelled = false;
 
-    const syncProfile = async (firebaseUser: User) => {
+    const syncProfile = async (supabaseUser: any) => {
       setDbConnecting(true);
       try {
-        const displayName = (firebaseUser.displayName || firebaseUser.email || 'User') as string;
+        const displayName = (supabaseUser?.user_metadata?.full_name || supabaseUser?.user_metadata?.name || supabaseUser?.email || 'User') as string;
 
         const names = displayName.split(' ');
         const firstName = names[0] || 'Unknown';
         const lastName = names.slice(1).join(' ') || 'User';
 
         const profilePayload = {
-          email: firebaseUser.email || '',
+          email: supabaseUser?.email || '',
           firstName,
           lastName,
           displayName,
@@ -54,11 +53,28 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
       }
     };
 
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const bootstrap = async () => {
+      const { data } = await supabase.auth.getSession();
+      const supabaseUser = data.session?.user ?? null;
       if (cancelled) return;
-      setUser(firebaseUser);
-      if (firebaseUser) {
-        await syncProfile(firebaseUser);
+      setUser(supabaseUser);
+      if (supabaseUser) {
+        await syncProfile(supabaseUser);
+      } else {
+        setUserProfile(null);
+        setDbConnecting(false);
+      }
+      setLoading(false);
+    };
+
+    void bootstrap();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (cancelled) return;
+      const supabaseUser = session?.user ?? null;
+      setUser(supabaseUser);
+      if (supabaseUser) {
+        await syncProfile(supabaseUser);
       } else {
         setUserProfile(null);
         setDbConnecting(false);
@@ -68,7 +84,7 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
 
     return () => {
       cancelled = true;
-      unsubscribe();
+      authListener.subscription.unsubscribe();
     };
   }, []);
 
@@ -81,4 +97,3 @@ export const UserProvider = ({ children }: { children: React.ReactNode }) => {
 };
 
 export const useUser = () => useContext(UserContext);
-

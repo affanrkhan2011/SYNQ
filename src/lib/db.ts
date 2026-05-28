@@ -1,68 +1,59 @@
-import { auth } from './firebase';
+import { supabase } from './supabaseClient';
 
-const getApiBase = () => {
-  if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL;
-  }
-  // If we are in production and running on the same domain as the server, it will be relative.
-  // In Vite dev mode, we usually need the absolute URL or a proxy, but assuming the Node backend is on port 3000
-  // or via VITE_API_URL. Let's use the current origin if not localhost, otherwise localhost:3000
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return ''; // same origin
-  }
-  return 'http://localhost:3000';
-};
-
-const API_BASE = getApiBase();
-
-async function getAuthHeaders() {
-  const user = auth.currentUser;
+async function currentUserId() {
+  const { data, error } = await supabase.auth.getUser();
+  if (error) throw error;
+  const user = data.user;
   if (!user) throw new Error('No authenticated user');
-  const token = await user.getIdToken();
-  return {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${token}`
-  };
+  return user.id;
 }
 
 export async function upsertMe(payload: { email: string; displayName: string }) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/me/upsert`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload)
+  const userId = await currentUserId();
+  const { error } = await supabase.from('users').upsert({
+    id: userId,
+    email: payload.email,
+    display_name: payload.displayName,
   });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Failed to upsert user profile');
-  }
+  if (error) throw error;
   return true;
 }
 
 export async function listProjects() {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects`, {
-    method: 'GET',
-    headers
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Failed to fetch projects');
-  }
-  return res.json();
+  const userId = await currentUserId();
+  const { data, error } = await supabase
+    .from('memberships')
+    .select('project_id, role, created_at, projects(id, name, owner_id, created_at)')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  return (data || []).map((row: any) => ({
+    id: row.project_id,
+    groupId: row.project_id,
+    groupName: row.projects?.name,
+    joinedAt: row.created_at,
+    role: row.role,
+  }));
 }
 
 export async function createProject(payload: { id: string; name: string }) {
-  const headers = await getAuthHeaders();
-  const res = await fetch(`${API_BASE}/api/projects`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload)
+  const userId = await currentUserId();
+
+  const { error: projectError } = await supabase.from('projects').insert({
+    id: payload.id,
+    name: payload.name,
+    owner_id: userId,
   });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || 'Failed to create project');
-  }
-  return res.json();
+  if (projectError) throw projectError;
+
+  const { error: membershipError } = await supabase.from('memberships').insert({
+    user_id: userId,
+    project_id: payload.id,
+    role: 'owner',
+  });
+  if (membershipError) throw membershipError;
+
+  return { groupId: payload.id, groupName: payload.name };
 }
 

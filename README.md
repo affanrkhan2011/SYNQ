@@ -39,3 +39,8 @@ Also add your Render domain in Firebase Console -> Authentication -> Settings ->
 - Firebase Auth remains active.
 - Project persistence (`/api/projects`) now runs through Render API + Postgres.
 - Group tasks/chat/docs are still on Firestore and can be migrated in a follow-up pass.
+
+## Supabase schema
+
+- Run `supabase/schema.sql` in the Supabase SQL editor to create the tables, indexes, and RLS policies.
+- The schema stores personalized data per user and project through `users`, `projects`, and `memberships`.

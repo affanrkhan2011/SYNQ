@@ -2,6 +2,7 @@ import { useEffect, useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUser } from '../components/AuthProvider';
 import { supabase } from '../lib/supabaseClient';
+import { getSiteUrl } from '../lib/siteUrl';
 
 export default function Login() {
   const { user, loading } = useUser();
@@ -21,7 +22,7 @@ export default function Login() {
   const handleGoogleLogin = async () => {
     setErrorMsg('');
     try {
-      const authCallbackUrl = `${window.location.origin}/auth/callback`;
+      const authCallbackUrl = `${getSiteUrl()}/auth/callback`;
       await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: { redirectTo: authCallbackUrl },
@@ -46,7 +47,7 @@ export default function Login() {
     setErrorMsg('');
     setIsSubmitting(true);
     try {
-      const authCallbackUrl = `${window.location.origin}/auth/callback`;
+      const authCallbackUrl = `${getSiteUrl()}/auth/callback`;
       if (isLogin) {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
